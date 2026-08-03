@@ -1,5 +1,7 @@
 package rw.smart.ecommerce.core.user.model;
 
+import rw.smart.ecommerce.utils.validation.RegexValidator;
+
 import java.time.LocalDateTime;
 
 public class User {
@@ -17,6 +19,7 @@ public class User {
     }
 
     public User(int userId, String username, String email, String passwordHash, String fullName, String phone, LocalDateTime createdAt) {
+        RegexValidator.validateUserEmail(email);
         this.userId = userId;
         this.username = username;
         this.email = email;
