@@ -2,6 +2,9 @@ package rw.smart.ecommerce.utils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.Properties;
 
 public class DBConnection {
@@ -25,6 +28,10 @@ public class DBConnection {
 
     private DBConnection() {
         // utility class, no instances
+    }
+
+    public static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(URL, USER, PASSWORD);
     }
 
     public static Properties loadConfiguration() {
