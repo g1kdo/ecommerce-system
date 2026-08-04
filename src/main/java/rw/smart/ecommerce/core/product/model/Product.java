@@ -13,7 +13,7 @@ public class Product {
     private int categoryId;
     private LocalDateTime createdAt;
 
-    private Product() {
+    public Product() {
 
     }
 
