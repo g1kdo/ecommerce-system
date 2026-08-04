@@ -24,6 +24,28 @@ public class ReviewDAO {
         }
     }
 
+    /**
+     * Records a rating, replacing the author's previous one if present — the
+     * UNIQUE (product_id, user_id) constraint allows only one rating per user
+     * per product, so a re-rate is an update rather than a second row.
+     */
+    public int upsertRating(int productId, int userId, int rating) throws SQLException {
+        String sql = "INSERT INTO Reviews (product_id, user_id, rating) VALUES (?, ?, ?) " +
+                "ON CONFLICT (product_id, user_id) DO UPDATE " +
+                "SET rating = EXCLUDED.rating, created_at = CURRENT_TIMESTAMP " +
+                "RETURNING review_id";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, productId);
+            ps.setInt(2, userId);
+            ps.setInt(3, rating);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
+    }
+
     public List<Review> findByProduct(int productId) throws SQLException {
         String sql = "SELECT * FROM Reviews WHERE product_id = ?";
         List<Review> results = new ArrayList<>();

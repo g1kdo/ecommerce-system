@@ -43,7 +43,9 @@ public class OrderService {
 
                 conn.commit();
                 return orderId;
-            } catch (InsufficientStockException e) {
+            } catch (InsufficientStockException | SQLException e) {
+                // rollback must also cover SQL failures: setAutoCommit(true) in the
+                // finally block would otherwise commit the half-written order.
                 conn.rollback();
                 throw e;
             } finally {

@@ -4,6 +4,8 @@ import rw.smart.ecommerce.core.inventory.model.Inventory;
 import rw.smart.ecommerce.utils.DBConnection;
 
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 public class InventoryDAO {
 
@@ -16,6 +18,23 @@ public class InventoryDAO {
                 return rs.next() ? mapRow(rs) : null;
             }
         }
+    }
+
+    /**
+     * All stock rows in one round trip — the stock screen needs a quantity per
+     * product and would otherwise issue one query per table row (N+1).
+     */
+    public List<Inventory> findAll() throws SQLException {
+        String sql = "SELECT * FROM Inventory";
+        List<Inventory> results = new ArrayList<>();
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                results.add(mapRow(rs));
+            }
+        }
+        return results;
     }
 
     /**
@@ -45,6 +64,22 @@ public class InventoryDAO {
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, quantity);
             ps.setInt(2, productId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    /**
+     * Sets stock for a product whether or not it already has an Inventory row —
+     * products created through the product form start out without one.
+     */
+    public boolean upsertQuantity(int productId, int quantity) throws SQLException {
+        String sql = "INSERT INTO Inventory (product_id, quantity) VALUES (?, ?) " +
+                "ON CONFLICT (product_id) DO UPDATE " +
+                "SET quantity = EXCLUDED.quantity, last_updated = CURRENT_TIMESTAMP";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, productId);
+            ps.setInt(2, quantity);
             return ps.executeUpdate() > 0;
         }
     }
