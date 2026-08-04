@@ -1,0 +1,180 @@
+/* ---------- shell ---------- */
+
+.app-shell {
+    -fx-background-color: linear-gradient(to bottom right, #f8fafc, #eef2ff);
+}
+
+/* feature screens are swapped into the shell, so they stay transparent */
+.content-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 0 0 0 14;
+}
+
+.header-panel {
+    -fx-background-color: white;
+    -fx-border-color: transparent transparent #dbe4f0 transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.nav-panel {
+    -fx-background-color: white;
+    -fx-border-color: transparent #dbe4f0 transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.brand {
+    -fx-font-size: 17px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #1e293b;
+}
+
+.nav-section {
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #94a3b8;
+    -fx-padding: 4 0 0 6;
+}
+
+.nav-button {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10;
+    -fx-text-fill: #334155;
+    -fx-font-weight: 600;
+    -fx-padding: 8 12 8 12;
+    -fx-graphic-text-gap: 10;
+}
+
+.nav-button:hover {
+    -fx-background-color: #eef2ff;
+    -fx-cursor: hand;
+}
+
+.nav-button.nav-active {
+    -fx-background-color: #4f46e5;
+    -fx-text-fill: white;
+}
+
+.nav-button.nav-active .ikonli-font-icon {
+    -fx-icon-color: white;
+    -fx-fill: white;
+}
+
+/* ---------- panels ---------- */
+
+.toolbar-panel,
+.footer-panel,
+.form-shell,
+.card,
+.cart-panel {
+    -fx-background-color: white;
+    -fx-background-radius: 14;
+    -fx-border-color: #dbe4f0;
+    -fx-border-radius: 14;
+    -fx-border-width: 1;
+    -fx-padding: 14;
+}
+
+.shop-split {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.shop-split > .split-pane-divider {
+    -fx-background-color: transparent;
+    -fx-padding: 0 6 0 6;
+}
+
+.product-table {
+    -fx-background-color: white;
+    -fx-background-radius: 14;
+    -fx-border-color: #dbe4f0;
+    -fx-border-radius: 14;
+}
+
+/* ---------- typography ---------- */
+
+.screen-title {
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #1e293b;
+}
+
+.screen-subtitle {
+    -fx-font-size: 12px;
+    -fx-text-fill: #64748b;
+}
+
+.panel-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #334155;
+}
+
+.field-label {
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #475569;
+}
+
+.total-label {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #0f766e;
+}
+
+.form-error {
+    -fx-text-fill: #b91c1c;
+    -fx-font-size: 12px;
+}
+
+/* shown when the document store cannot be reached */
+.store-warning {
+    -fx-background-color: #fffbeb;
+    -fx-border-color: #fcd34d;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: #92400e;
+    -fx-font-size: 12px;
+    -fx-padding: 8 10 8 10;
+}
+
+.detail-pane {
+    -fx-background-color: #f8fafc;
+    -fx-background-radius: 10;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 10;
+    -fx-padding: 10;
+}
+
+/* ---------- table state ---------- */
+
+.low-stock-row {
+    -fx-background-color: #fef2f2;
+}
+
+.low-stock-row .table-cell {
+    -fx-text-fill: #b91c1c;
+}
+
+/* ---------- controls ---------- */
+
+.button {
+    -fx-font-weight: 600;
+}
+
+.button:hover {
+    -fx-cursor: hand;
+}
+
+.text-field,
+.combo-box,
+.text-area,
+.spinner,
+.password-field {
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+}
+
+.label {
+    -fx-text-fill: #334155;
+}

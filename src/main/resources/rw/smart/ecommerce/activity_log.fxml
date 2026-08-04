@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<BorderPane fx:id="rootPane" xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="rw.smart.ecommerce.controller.ActivityLogController">
+
+    <top>
+        <VBox spacing="10">
+            <padding>
+                <Insets top="10" right="0" bottom="10" left="0"/>
+            </padding>
+            <VBox spacing="2">
+                <Label text="Activity Log" styleClass="screen-title"/>
+                <Label text="System events from the NoSQL log collection - written asynchronously, read by recency, user, or event type."
+                       styleClass="screen-subtitle" wrapText="true"/>
+            </VBox>
+            <Label fx:id="storeStatusLabel" styleClass="store-warning" wrapText="true"
+                   managed="false" visible="false"/>
+            <HBox fx:id="toolbar" spacing="10" alignment="CENTER_LEFT">
+                <Label text="Event" styleClass="field-label"/>
+                <ComboBox fx:id="eventFilter" prefWidth="200"/>
+                <CheckBox fx:id="mineOnlyCheckBox" text="Only my activity"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="countLabel"/>
+                <Button fx:id="refreshButton" text="Refresh" onAction="#onRefresh"/>
+            </HBox>
+        </VBox>
+    </top>
+
+    <center>
+        <TableView fx:id="logTable">
+            <columns>
+                <TableColumn fx:id="timeColumn" text="When" prefWidth="150"/>
+                <TableColumn fx:id="eventColumn" text="Event" prefWidth="170"/>
+                <TableColumn fx:id="userColumn" text="User" prefWidth="150"/>
+                <TableColumn fx:id="detailsColumn" text="Details" prefWidth="380"/>
+            </columns>
+        </TableView>
+    </center>
+
+</BorderPane>

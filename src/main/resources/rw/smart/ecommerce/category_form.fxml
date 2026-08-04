@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="formRoot" xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="rw.smart.ecommerce.controller.CategoryFormController"
+      spacing="10" prefWidth="420">
+
+    <padding>
+        <Insets top="20" right="20" bottom="20" left="20"/>
+    </padding>
+
+    <Label fx:id="titleLabel" text="New Category" styleClass="screen-title"/>
+
+    <Label text="Name" styleClass="field-label"/>
+    <TextField fx:id="nameField" promptText="e.g. Peripherals"/>
+
+    <Label text="Description" styleClass="field-label"/>
+    <TextArea fx:id="descriptionField" promptText="Optional description" prefRowCount="3" wrapText="true"/>
+
+    <HBox spacing="10" alignment="CENTER_RIGHT">
+        <Button fx:id="cancelButton" text="Cancel" onAction="#onCancel"/>
+        <Button fx:id="saveButton" text="Save" onAction="#onSave"/>
+    </HBox>
+
+</VBox>

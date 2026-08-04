@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<BorderPane fx:id="rootPane" xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="rw.smart.ecommerce.controller.ProductListController">
+
+    <top>
+        <VBox spacing="10">
+            <padding>
+                <Insets top="10" right="0" bottom="10" left="0"/>
+            </padding>
+            <VBox spacing="2">
+                <Label text="Products" styleClass="screen-title"/>
+                <Label text="Search, filter and sort the catalogue, or add and edit products."
+                       styleClass="screen-subtitle"/>
+            </VBox>
+            <HBox fx:id="toolbar" spacing="10" alignment="CENTER_LEFT">
+                <TextField fx:id="searchField" promptText="Search by product name" prefWidth="240"/>
+                <Button fx:id="searchButton" text="Search" onAction="#onSearch"/>
+                <ComboBox fx:id="categoryFilter" promptText="All categories" prefWidth="170"/>
+                <ComboBox fx:id="sortOptions" promptText="Sort by" prefWidth="150"/>
+                <Button fx:id="newProductButton" text="New Product" onAction="#onNewProduct"/>
+                <Button fx:id="editProductButton" text="Edit" onAction="#onEditProduct"/>
+                <Button fx:id="deleteProductButton" text="Delete" onAction="#onDeleteProduct"/>
+            </HBox>
+        </VBox>
+    </top>
+
+    <center>
+        <TableView fx:id="productTable">
+            <columns>
+                <TableColumn fx:id="nameColumn" text="Name" prefWidth="260"/>
+                <TableColumn fx:id="skuColumn" text="SKU" prefWidth="140"/>
+                <TableColumn fx:id="priceColumn" text="Price" prefWidth="110"/>
+                <TableColumn fx:id="categoryColumn" text="Category" prefWidth="180"/>
+            </columns>
+        </TableView>
+    </center>
+
+    <bottom>
+        <HBox fx:id="footerBar" spacing="10" alignment="CENTER_RIGHT">
+            <padding>
+                <Insets top="10" right="0" bottom="0" left="0"/>
+            </padding>
+            <Button fx:id="prevPageButton" text="Previous" onAction="#onPrevPage"/>
+            <Label fx:id="pageLabel" text="Page 1"/>
+            <Button fx:id="nextPageButton" text="Next" onAction="#onNextPage"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>

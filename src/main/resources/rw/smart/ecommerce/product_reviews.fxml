@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.Spinner?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="reviewsRoot" xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="rw.smart.ecommerce.controller.ProductReviewsController"
+      spacing="10" prefWidth="720" prefHeight="640">
+
+    <padding>
+        <Insets top="18" right="18" bottom="18" left="18"/>
+    </padding>
+
+    <VBox spacing="2">
+        <Label fx:id="productLabel" text="Product" styleClass="screen-title"/>
+        <Label fx:id="averageLabel" styleClass="screen-subtitle"/>
+    </VBox>
+
+    <Label fx:id="storeStatusLabel" styleClass="store-warning" wrapText="true"
+           managed="false" visible="false"/>
+
+    <TableView fx:id="reviewTable" VBox.vgrow="ALWAYS" prefHeight="200">
+        <columns>
+            <TableColumn fx:id="reviewerColumn" text="Reviewer" prefWidth="140"/>
+            <TableColumn fx:id="ratingColumn" text="Rating" prefWidth="110"/>
+            <TableColumn fx:id="commentColumn" text="Comment" prefWidth="240"/>
+            <TableColumn fx:id="helpfulColumn" text="Helpful" prefWidth="70"/>
+            <TableColumn fx:id="dateColumn" text="Rated on" prefWidth="130"/>
+        </columns>
+    </TableView>
+
+    <VBox fx:id="detailPane" spacing="4">
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Label text="Selected review" styleClass="panel-title"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button fx:id="markHelpfulButton" text="Mark helpful" onAction="#onMarkHelpful"/>
+        </HBox>
+        <Label fx:id="bodyLabel" text="Select a review to see its full content." wrapText="true"/>
+        <Label fx:id="photosLabel" styleClass="screen-subtitle" wrapText="true"/>
+        <Label fx:id="tagsLabel" styleClass="screen-subtitle" wrapText="true"/>
+        <Label fx:id="sellerResponseLabel" styleClass="screen-subtitle" wrapText="true"/>
+        <Label fx:id="editHistoryLabel" styleClass="screen-subtitle" wrapText="true"/>
+    </VBox>
+
+    <Separator/>
+
+    <VBox spacing="6">
+        <Label text="Your review" styleClass="panel-title"/>
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Label text="Rating" styleClass="field-label"/>
+            <Spinner fx:id="ratingSpinner" prefWidth="80"/>
+            <Label text="Tags" styleClass="field-label"/>
+            <TextField fx:id="tagsField" promptText="comma,separated,tags" prefWidth="220"/>
+        </HBox>
+        <TextArea fx:id="bodyField" promptText="Optional: what did you think of this product?"
+                  prefRowCount="3" wrapText="true"/>
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Button fx:id="submitRatingButton" text="Submit Review" onAction="#onSubmitRating"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button fx:id="closeButton" text="Close" onAction="#onClose"/>
+        </HBox>
+    </VBox>
+
+</VBox>

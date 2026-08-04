@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+
+<StackPane fx:id="rootPane" xmlns="http://javafx.com/javafx"
+           xmlns:fx="http://javafx.com/fxml"
+           fx:controller="rw.smart.ecommerce.controller.LoginController">
+
+    <padding>
+        <Insets top="40" right="40" bottom="40" left="40"/>
+    </padding>
+
+    <VBox fx:id="loginCard" spacing="12" maxWidth="400" maxHeight="-Infinity">
+        <Label text="Smart E-Commerce" styleClass="screen-title"/>
+        <Label text="Sign in to browse products and place orders." styleClass="screen-subtitle" wrapText="true"/>
+
+        <Region prefHeight="6"/>
+
+        <Label text="Email" styleClass="field-label"/>
+        <TextField fx:id="emailField" promptText="you@example.com"/>
+
+        <Label text="Password" styleClass="field-label"/>
+        <PasswordField fx:id="passwordField" promptText="Your password"/>
+
+        <Label fx:id="messageLabel" styleClass="form-error" wrapText="true" managed="false" visible="false"/>
+
+        <Button fx:id="loginButton" text="Sign In" onAction="#onLogin" maxWidth="Infinity"/>
+
+        <HBox spacing="6" alignment="CENTER_LEFT">
+            <Label text="No account yet?"/>
+            <Button fx:id="registerButton" text="Create one" onAction="#onGoToRegister"/>
+        </HBox>
+    </VBox>
+
+</StackPane>
