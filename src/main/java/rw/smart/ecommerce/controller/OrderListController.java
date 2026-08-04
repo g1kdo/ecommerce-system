@@ -8,6 +8,8 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.core.order.enums.Status;
 import rw.smart.ecommerce.core.order.model.Order;
 import rw.smart.ecommerce.core.order.service.OrderService;
@@ -22,6 +24,7 @@ import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -50,6 +53,7 @@ public class OrderListController implements RefreshableView {
     @FXML private Label summaryLabel;
 
     private final OrderService orderService = new OrderService();
+    private final LogService logService = new LogService();
 
     @FXML
     public void initialize() {
@@ -166,8 +170,13 @@ public class OrderListController implements RefreshableView {
             return;
         }
 
+        Status previousStatus = selected.getStatus();
         try {
             if (orderService.updateStatus(selected.getOrderId(), newStatus)) {
+                logService.log(EventType.ORDER_STATUS_CHANGED, Map.of(
+                        "order_id", selected.getOrderId(),
+                        "from", previousStatus.name(),
+                        "to", newStatus.name()));
                 Notifier.info("Order #" + selected.getOrderId() + " is now " + newStatus + ".");
             } else {
                 Notifier.warn("Order #" + selected.getOrderId() + " could not be found.");

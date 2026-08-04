@@ -10,6 +10,8 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.core.user.model.User;
 import rw.smart.ecommerce.core.user.service.UserService;
 import rw.smart.ecommerce.utils.exceptions.InvalidInputException;
@@ -19,6 +21,7 @@ import rw.smart.ecommerce.utils.ui.Notifier;
 import rw.smart.ecommerce.utils.validation.RegexValidator;
 
 import java.sql.SQLException;
+import java.util.Map;
 
 /**
  * Entry screen. Authenticates against UserService (which compares the SHA-256
@@ -35,6 +38,7 @@ public class LoginController {
     @FXML private Button registerButton;
 
     private final UserService userService = new UserService();
+    private final LogService logService = new LogService();
 
     @FXML
     public void initialize() {
@@ -65,11 +69,14 @@ public class LoginController {
             RegexValidator.validateUserEmail(email);
             User user = userService.authenticate(email, password);
             if (user == null) {
+                // no user id and no email in the log entry - just the outcome
+                logService.log(EventType.LOGIN_FAILED, null, Map.of("reason", "invalid_credentials"));
                 showMessage("Those credentials do not match any account.");
                 return;
             }
 
             Session.login(user);
+            logService.log(EventType.LOGIN, Map.of("username", user.getUsername()));
             Navigation.showMainShell(Navigation.stageOf(rootPane));
         } catch (InvalidInputException e) {
             showMessage(e.getMessage());

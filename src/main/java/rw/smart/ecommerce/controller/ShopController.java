@@ -15,6 +15,8 @@ import rw.smart.ecommerce.core.category.model.Category;
 import rw.smart.ecommerce.core.category.service.CategoryService;
 import rw.smart.ecommerce.core.inventory.model.Inventory;
 import rw.smart.ecommerce.core.inventory.service.InventoryService;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.core.order.model.Order;
 import rw.smart.ecommerce.core.order.model.item.CartItem;
 import rw.smart.ecommerce.core.order.service.OrderService;
@@ -75,6 +77,7 @@ public class ShopController implements RefreshableView {
     private final CategoryService categoryService = new CategoryService();
     private final InventoryService inventoryService = new InventoryService();
     private final OrderService orderService = new OrderService();
+    private final LogService logService = new LogService();
 
     private final Map<Integer, String> categoryNamesById = new HashMap<>();
     private final Map<Integer, Integer> stockByProductId = new HashMap<>();
@@ -166,7 +169,16 @@ public class ShopController implements RefreshableView {
         try {
             reloadStock();
 
-            List<Product> products = productService.search(searchField.getText());
+            // captured before the search: a warm cache means it was served from memory
+            boolean cacheWarm = productService.isCacheWarm();
+            String searchTerm = searchField.getText();
+            List<Product> products = productService.search(searchTerm);
+            if (searchTerm != null && !searchTerm.isBlank()) {
+                logService.log(EventType.PRODUCT_SEARCH, Map.of(
+                        "query", searchTerm.trim(),
+                        "results_count", products.size(),
+                        "cache_hit", cacheWarm));
+            }
             Category selectedCategory = categoryFilter.getValue();
             if (selectedCategory != null) {
                 products = products.stream()
@@ -286,13 +298,17 @@ public class ShopController implements RefreshableView {
         order.setUserId(Session.currentUserId());
         order.setItems(cart.stream().map(CartItem::toOrderItem).collect(Collectors.toList()));
 
+        int lineCount = cart.size();
         try {
             int orderId = orderService.placeOrder(order);
+            logService.log(EventType.ORDER_PLACED, Map.of(
+                    "order_id", orderId, "total", total, "lines", lineCount));
             cart.clear();
             refreshProducts();
             Notifier.info("Order #" + orderId + " placed for " + total + ".");
         } catch (InsufficientStockException e) {
             // the order transaction was rolled back, so nothing was reserved
+            logService.log(EventType.ORDER_REJECTED, Map.of("reason", "insufficient_stock", "lines", lineCount));
             Notifier.warn("Someone bought the last units first - stock is no longer sufficient. Nothing was charged.");
             refreshProducts();
         } catch (SQLException e) {

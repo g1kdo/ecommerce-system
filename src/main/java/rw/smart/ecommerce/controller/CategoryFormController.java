@@ -13,9 +13,12 @@ import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
 import rw.smart.ecommerce.core.category.model.Category;
 import rw.smart.ecommerce.core.category.service.CategoryService;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.utils.ui.Notifier;
 
 import java.sql.SQLException;
+import java.util.Map;
 
 /** Create/edit dialog for a single category. */
 public class CategoryFormController {
@@ -30,6 +33,7 @@ public class CategoryFormController {
     @FXML private Button cancelButton;
 
     private final CategoryService categoryService = new CategoryService();
+    private final LogService logService = new LogService();
 
     private Category editingCategory; // null = create mode, non-null = edit mode
 
@@ -70,9 +74,12 @@ public class CategoryFormController {
 
         try {
             if (editingCategory == null) {
-                categoryService.createCategory(category);
+                int categoryId = categoryService.createCategory(category);
+                logService.log(EventType.CATEGORY_CREATED, Map.of("category_id", categoryId, "name", name));
             } else {
                 categoryService.updateCategory(category);
+                logService.log(EventType.CATEGORY_UPDATED,
+                        Map.of("category_id", category.getCategoryId(), "name", name));
             }
             Notifier.info("Category saved successfully.");
             closeWindow();

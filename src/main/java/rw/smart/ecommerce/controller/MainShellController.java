@@ -11,6 +11,8 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.utils.session.Session;
 import rw.smart.ecommerce.utils.ui.Navigation;
 import rw.smart.ecommerce.utils.ui.Notifier;
@@ -40,8 +42,10 @@ public class MainShellController {
     @FXML private Button productsNavButton;
     @FXML private Button categoriesNavButton;
     @FXML private Button inventoryNavButton;
+    @FXML private Button activityNavButton;
     @FXML private Button profileNavButton;
 
+    private final LogService logService = new LogService();
     private final Map<String, Parent> loadedViews = new HashMap<>();
     private final Map<String, Object> viewControllers = new HashMap<>();
 
@@ -58,12 +62,13 @@ public class MainShellController {
         logoutButton.setContentDisplay(ContentDisplay.LEFT);
 
         navButtons = List.of(shopNavButton, ordersNavButton, productsNavButton,
-                categoriesNavButton, inventoryNavButton, profileNavButton);
+                categoriesNavButton, inventoryNavButton, activityNavButton, profileNavButton);
         styleNav(shopNavButton, FontAwesomeSolid.STORE);
         styleNav(ordersNavButton, FontAwesomeSolid.RECEIPT);
         styleNav(productsNavButton, FontAwesomeSolid.BOX_OPEN);
         styleNav(categoriesNavButton, FontAwesomeSolid.TAGS);
         styleNav(inventoryNavButton, FontAwesomeSolid.WAREHOUSE);
+        styleNav(activityNavButton, FontAwesomeSolid.HISTORY);
         styleNav(profileNavButton, FontAwesomeSolid.USER);
 
         userLabel.setText("Signed in as " + Session.currentUser().getFullName());
@@ -96,6 +101,11 @@ public class MainShellController {
     }
 
     @FXML
+    private void onShowActivityLog() {
+        showView("activity_log.fxml", activityNavButton);
+    }
+
+    @FXML
     private void onShowProfile() {
         showView("profile.fxml", profileNavButton);
     }
@@ -105,6 +115,8 @@ public class MainShellController {
         if (!Notifier.confirm("Sign out?", "You will need to sign in again to continue shopping.")) {
             return;
         }
+        // logged before the session is cleared, so the event still carries the user
+        logService.log(EventType.LOGOUT, Map.of());
         Session.logout();
         Navigation.showLogin(Navigation.stageOf(rootPane));
     }

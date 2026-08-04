@@ -15,8 +15,18 @@ import java.util.List;
 
 public class OrderService {
 
-    private final OrderDAO orderDAO = new OrderDAO();
-    private final InventoryDAO inventoryDAO = new InventoryDAO();
+    private final OrderDAO orderDAO;
+    private final InventoryDAO inventoryDAO;
+
+    public OrderService() {
+        this(new OrderDAO(), new InventoryDAO());
+    }
+
+    /** Injection point for tests. */
+    public OrderService(OrderDAO orderDAO, InventoryDAO inventoryDAO) {
+        this.orderDAO = orderDAO;
+        this.inventoryDAO = inventoryDAO;
+    }
 
     /**
      * Places an order: computes the total (denormalized on Orders.total_amount),

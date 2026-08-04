@@ -12,7 +12,16 @@ import java.util.HexFormat;
 
 public class UserService {
 
-    private final UserDAO userDAO = new UserDAO();
+    private final UserDAO userDAO;
+
+    public UserService() {
+        this(new UserDAO());
+    }
+
+    /** Injection point for tests. */
+    public UserService(UserDAO userDAO) {
+        this.userDAO = userDAO;
+    }
 
     public int register(User user, String plainPassword) throws SQLException {
         user.setPasswordHash(hash(plainPassword));

@@ -20,8 +20,18 @@ public class ProductService {
     private final ProductCache cache;
 
     public ProductService() {
-        this.productDAO = new ProductDAO();
-        this.cache = new ProductCache();
+        this(new ProductDAO(), new ProductCache());
+    }
+
+    /** Injection point for tests, which supply a mocked DAO and a real cache. */
+    public ProductService(ProductDAO productDAO, ProductCache cache) {
+        this.productDAO = productDAO;
+        this.cache = cache;
+    }
+
+    /** Whether reads are currently served from memory — reported in search logs. */
+    public boolean isCacheWarm() {
+        return cache.isLoaded();
     }
 
     /**
@@ -80,7 +90,14 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
+    /*
+     * The mutators warm the cache before writing through. Without that, a write
+     * against a cold cache is silently discarded: the entry is put first, then the
+     * next read triggers loadAll(), which clears the map to replace it.
+     */
+
     public int createProduct(Product product) throws SQLException {
+        ensureCacheLoaded();
         int newId = productDAO.insert(product);
         product.setProductId(newId);
         cache.put(product); // write-through invalidation (new entry)
@@ -88,6 +105,7 @@ public class ProductService {
     }
 
     public boolean updateProduct(Product product) throws SQLException {
+        ensureCacheLoaded();
         boolean success = productDAO.update(product);
         if (success) {
             cache.put(product); // write-through invalidation (refresh entry)
@@ -96,6 +114,7 @@ public class ProductService {
     }
 
     public boolean deleteProduct(int productId) throws SQLException {
+        ensureCacheLoaded();
         boolean success = productDAO.delete(productId);
         if (success) {
             cache.invalidate(productId); // write-through invalidation (remove entry)

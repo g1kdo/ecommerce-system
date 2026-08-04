@@ -8,7 +8,16 @@ import java.util.List;
 
 public class CategoryService {
 
-    private final CategoryDAO categoryDAO = new CategoryDAO();
+    private final CategoryDAO categoryDAO;
+
+    public CategoryService() {
+        this(new CategoryDAO());
+    }
+
+    /** Injection point for tests. */
+    public CategoryService(CategoryDAO categoryDAO) {
+        this.categoryDAO = categoryDAO;
+    }
 
     public List<Category> getAllCategories() throws SQLException {
         return categoryDAO.findAll();

@@ -9,6 +9,8 @@ import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
 import rw.smart.ecommerce.core.category.model.Category;
 import rw.smart.ecommerce.core.category.service.CategoryService;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.core.product.model.Product;
 import rw.smart.ecommerce.core.product.service.ProductService;
 import rw.smart.ecommerce.utils.ui.Notifier;
@@ -16,6 +18,7 @@ import rw.smart.ecommerce.utils.ui.Notifier;
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 
 public class ProductFormController {
     @FXML private GridPane formRoot;
@@ -30,6 +33,7 @@ public class ProductFormController {
 
     private final ProductService productService = new ProductService();
     private final CategoryService categoryService = new CategoryService();
+    private final LogService logService = new LogService();
 
     private Product editingProduct; // null = create mode, non-null = edit mode
 
@@ -89,8 +93,12 @@ public class ProductFormController {
 
             if (editingProduct == null) {
                 productService.createProduct(product);
+                logService.log(EventType.PRODUCT_CREATED,
+                        Map.of("product_id", product.getProductId(), "sku", product.getSku()));
             } else {
                 productService.updateProduct(product);
+                logService.log(EventType.PRODUCT_UPDATED,
+                        Map.of("product_id", product.getProductId(), "sku", product.getSku()));
             }
 
             Notifier.info("Product saved successfully.");

@@ -10,6 +10,8 @@ import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
 import rw.smart.ecommerce.core.inventory.model.Inventory;
 import rw.smart.ecommerce.core.inventory.service.InventoryService;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.core.product.model.Product;
 import rw.smart.ecommerce.core.product.service.ProductService;
 import rw.smart.ecommerce.utils.exceptions.InvalidInputException;
@@ -51,6 +53,7 @@ public class InventoryListController implements RefreshableView {
 
     private final ProductService productService = new ProductService();
     private final InventoryService inventoryService = new InventoryService();
+    private final LogService logService = new LogService();
 
     /** One table row: a product plus its (possibly absent) stock record. */
     public static class StockRow {
@@ -190,6 +193,10 @@ public class InventoryListController implements RefreshableView {
         try {
             int quantity = quantitySpinner.getValue();
             inventoryService.setStock(selected.getProduct().getProductId(), quantity);
+            logService.log(EventType.STOCK_UPDATED, Map.of(
+                    "product_id", selected.getProduct().getProductId(),
+                    "quantity", quantity,
+                    "previous_quantity", selected.getQuantity()));
             Notifier.info(selected.getProduct().getName() + " stock set to " + quantity + ".");
             refresh();
         } catch (InvalidInputException e) {

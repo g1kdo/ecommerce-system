@@ -14,12 +14,15 @@ import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
 import rw.smart.ecommerce.core.category.model.Category;
 import rw.smart.ecommerce.core.category.service.CategoryService;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.utils.ui.Notifier;
 import rw.smart.ecommerce.utils.ui.RefreshableView;
 import rw.smart.ecommerce.utils.ui.ViewLoader;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * CRUD screen over CategoryService. No JDBC here — the controller only talks to
@@ -41,6 +44,7 @@ public class CategoryListController implements RefreshableView {
     @FXML private Button refreshButton;
 
     private final CategoryService categoryService = new CategoryService();
+    private final LogService logService = new LogService();
 
     @FXML
     public void initialize() {
@@ -128,6 +132,8 @@ public class CategoryListController implements RefreshableView {
 
         try {
             categoryService.deleteCategory(selected.getCategoryId());
+            logService.log(EventType.CATEGORY_DELETED,
+                    Map.of("category_id", selected.getCategoryId(), "name", selected.getName()));
             Notifier.info("Category deleted successfully.");
             refresh();
         } catch (SQLException e) {

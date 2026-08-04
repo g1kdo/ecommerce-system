@@ -9,6 +9,8 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.VBox;
 import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.core.user.model.User;
 import rw.smart.ecommerce.core.user.service.UserService;
 import rw.smart.ecommerce.utils.exceptions.InvalidInputException;
@@ -19,6 +21,7 @@ import rw.smart.ecommerce.utils.validation.RegexValidator;
 
 import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
 
 /**
  * Account screen backed by UserService.getUser / updateProfile. Passwords are not
@@ -40,6 +43,7 @@ public class ProfileController implements RefreshableView {
     @FXML private Button resetButton;
 
     private final UserService userService = new UserService();
+    private final LogService logService = new LogService();
 
     @FXML
     public void initialize() {
@@ -86,6 +90,7 @@ public class ProfileController implements RefreshableView {
             current.setUsername(edited.getUsername());
             current.setEmail(edited.getEmail());
             current.setPhone(edited.getPhone());
+            logService.log(EventType.PROFILE_UPDATED, Map.of("username", edited.getUsername()));
             Notifier.info("Profile updated successfully.");
         } catch (InvalidInputException | IllegalArgumentException e) {
             Notifier.warn(e.getMessage());

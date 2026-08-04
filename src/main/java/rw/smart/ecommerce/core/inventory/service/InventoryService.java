@@ -16,7 +16,16 @@ import java.util.Map;
  */
 public class InventoryService {
 
-    private final InventoryDAO inventoryDAO = new InventoryDAO();
+    private final InventoryDAO inventoryDAO;
+
+    public InventoryService() {
+        this(new InventoryDAO());
+    }
+
+    /** Injection point for tests. */
+    public InventoryService(InventoryDAO inventoryDAO) {
+        this.inventoryDAO = inventoryDAO;
+    }
 
     public Inventory getInventory(int productId) throws SQLException {
         return inventoryDAO.findByProductId(productId);

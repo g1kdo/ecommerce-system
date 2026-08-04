@@ -10,6 +10,8 @@ import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
 import rw.smart.ecommerce.core.category.model.Category;
 import rw.smart.ecommerce.core.category.service.CategoryService;
+import rw.smart.ecommerce.core.log.enums.EventType;
+import rw.smart.ecommerce.core.log.service.LogService;
 import rw.smart.ecommerce.core.product.model.Product;
 import rw.smart.ecommerce.core.product.service.ProductService;
 import rw.smart.ecommerce.utils.ui.Notifier;
@@ -51,6 +53,7 @@ public class ProductListController implements RefreshableView {
 
     private final ProductService productService = new ProductService();
     private final CategoryService categoryService = new CategoryService();
+    private final LogService logService = new LogService();
     private final Map<Integer, String> categoryNamesById = new HashMap<>();
 
     private static final int PAGE_SIZE = 20;
@@ -131,7 +134,15 @@ public class ProductListController implements RefreshableView {
 
     private void refreshProducts() {
         try {
-            List<Product> products = productService.search(searchField.getText());
+            boolean cacheWarm = productService.isCacheWarm();
+            String searchTerm = searchField.getText();
+            List<Product> products = productService.search(searchTerm);
+            if (searchTerm != null && !searchTerm.isBlank()) {
+                logService.log(EventType.PRODUCT_SEARCH, Map.of(
+                        "query", searchTerm.trim(),
+                        "results_count", products.size(),
+                        "cache_hit", cacheWarm));
+            }
             Category selectedCategory = categoryFilter.getValue();
             if (selectedCategory != null) {
                 products = products.stream()
@@ -217,6 +228,8 @@ public class ProductListController implements RefreshableView {
         }
         try {
             productService.deleteProduct(selected.getProductId());
+            logService.log(EventType.PRODUCT_DELETED,
+                    Map.of("product_id", selected.getProductId(), "sku", selected.getSku()));
             Notifier.info("Product deleted successfully.");
             refreshProducts();
         } catch (SQLException e) {
