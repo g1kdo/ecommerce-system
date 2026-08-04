@@ -12,9 +12,18 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.12.1</junit.version>
+        <mockito.version>5.20.0</mockito.version>
+        <mongodb.version>5.6.5</mongodb.version>
     </properties>
 
     <dependencies>
+        <!-- Source: https://mvnrepository.com/artifact/org.postgresql/postgresql -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.13</version>
+            <scope>compile</scope>
+        </dependency>
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
@@ -67,6 +76,13 @@
             <artifactId>ikonli-javafx</artifactId>
             <version>12.3.1</version>
         </dependency>
+        <!-- Source: https://mvnrepository.com/artifact/org.kordamp.ikonli/ikonli-fontawesome5-pack -->
+        <dependency>
+            <groupId>org.kordamp.ikonli</groupId>
+            <artifactId>ikonli-fontawesome5-pack</artifactId>
+            <version>12.3.1</version>
+            <scope>compile</scope>
+        </dependency>
         <dependency>
             <groupId>org.kordamp.bootstrapfx</groupId>
             <artifactId>bootstrapfx-core</artifactId>
@@ -83,6 +99,14 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <!-- Source: https://mvnrepository.com/artifact/org.mongodb/mongodb-driver-sync -->
+        <!-- NoSQL document store: review content + system logs (see nosql/) -->
+        <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>mongodb-driver-sync</artifactId>
+            <version>${mongodb.version}</version>
+            <scope>compile</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
@@ -93,6 +117,25 @@
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
             <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-params</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Source: https://mvnrepository.com/artifact/org.mockito/mockito-core -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -106,6 +149,18 @@
                 <configuration>
                     <source>21</source>
                     <target>21</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.5</version>
+                <configuration>
+                    <!-- Tests run on the classpath: the unit tests mock DAOs and static
+                         factories, which JPMS strong encapsulation would otherwise block. -->
+                    <useModulePath>false</useModulePath>
+                    <!-- Mockito attaches its instrumentation agent at runtime on JDK 21+. -->
+                    <argLine>-XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
             </plugin>
             <plugin>

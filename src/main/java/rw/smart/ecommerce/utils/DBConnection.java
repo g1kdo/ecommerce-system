@@ -13,7 +13,7 @@ public class DBConnection {
     private static final String URL = requiredProperty("db.url");
     private static final String USER = requiredProperty("db.username");
     private static final String PASSWORD = requiredProperty("db.password");
-    private static final String DRIVER = optionalProperty("db.url");
+    private static final String DRIVER = optionalProperty("db.driver");
 
 
     static {
@@ -37,7 +37,7 @@ public class DBConnection {
     public static Properties loadConfiguration() {
         Properties properties = new Properties();
         try (InputStream inputStream = DBConnection.class.getResourceAsStream(CONFIG_RESOURCE)) {
-            if (inputStream == null) throw  new IllegalArgumentException("Missing configuration file: " + CONFIG_RESOURCE);
+            if (inputStream == null) throw new IllegalArgumentException("Missing configuration file: " + CONFIG_RESOURCE);
 
             properties.load(inputStream);
             return properties;
