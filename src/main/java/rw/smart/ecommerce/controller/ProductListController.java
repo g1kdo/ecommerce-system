@@ -5,7 +5,9 @@ import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Region;
 import org.kordamp.ikonli.fontawesome5.FontAwesomeSolid;
 import org.kordamp.ikonli.javafx.FontIcon;
 import rw.smart.ecommerce.core.category.model.Category;
@@ -33,7 +35,7 @@ public class ProductListController implements RefreshableView {
     private static final String FOREIGN_KEY_VIOLATION = "23503";
 
     @FXML private BorderPane rootPane;
-    @FXML private HBox toolbar;
+    @FXML private FlowPane toolbar;
     @FXML private HBox footerBar;
     @FXML private TextField searchField;
     @FXML private ComboBox<Category> categoryFilter;
@@ -50,6 +52,7 @@ public class ProductListController implements RefreshableView {
     @FXML private Button deleteProductButton;
     @FXML private Button prevPageButton;
     @FXML private Button nextPageButton;
+    @FXML private Button refreshButton;
 
     private final ProductService productService = new ProductService();
     private final CategoryService categoryService = new CategoryService();
@@ -99,6 +102,7 @@ public class ProductListController implements RefreshableView {
         stylePrimary(deleteProductButton, FontAwesomeSolid.TRASH, "btn btn-danger");
         stylePrimary(prevPageButton, FontAwesomeSolid.CHEVRON_LEFT, "btn btn-default");
         stylePrimary(nextPageButton, FontAwesomeSolid.CHEVRON_RIGHT, "btn btn-default");
+        stylePrimary(refreshButton, FontAwesomeSolid.SYNC_ALT, "btn btn-default");
 
         Tooltip.install(searchField, new Tooltip("Press Enter or click Search"));
         Tooltip.install(categoryFilter, new Tooltip("Filter the table by category"));
@@ -112,7 +116,8 @@ public class ProductListController implements RefreshableView {
         button.getStyleClass().addAll(styleClasses);
         button.setGraphic(new FontIcon(icon));
         button.setContentDisplay(ContentDisplay.LEFT);
-        button.setMaxWidth(Double.MAX_VALUE);
+        // the toolbar wraps rather than shrinking labels to "New Pro..."
+        button.setMinWidth(Region.USE_PREF_SIZE);
     }
 
     private void loadCategories() {
@@ -184,6 +189,19 @@ public class ProductListController implements RefreshableView {
 
     @FXML
     private void onSearch() {
+        currentPage = 0;
+        refreshProducts();
+    }
+
+    /** Re-reads the catalogue from the database, bypassing the cached snapshot. */
+    @FXML
+    private void onRefresh() {
+        try {
+            productService.reloadCache();
+        } catch (SQLException e) {
+            Notifier.error("Failed to reload products", e);
+            return;
+        }
         currentPage = 0;
         refreshProducts();
     }

@@ -9,6 +9,7 @@
 <?import javafx.scene.control.TableView?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
@@ -26,7 +27,7 @@
                 <Label text="Search, filter and sort the catalogue, or add and edit products."
                        styleClass="screen-subtitle"/>
             </VBox>
-            <HBox fx:id="toolbar" spacing="10" alignment="CENTER_LEFT">
+            <FlowPane fx:id="toolbar" hgap="10" vgap="10" alignment="CENTER_LEFT">
                 <TextField fx:id="searchField" promptText="Search by product name" prefWidth="240"/>
                 <Button fx:id="searchButton" text="Search" onAction="#onSearch"/>
                 <ComboBox fx:id="categoryFilter" promptText="All categories" prefWidth="170"/>
@@ -34,7 +35,8 @@
                 <Button fx:id="newProductButton" text="New Product" onAction="#onNewProduct"/>
                 <Button fx:id="editProductButton" text="Edit" onAction="#onEditProduct"/>
                 <Button fx:id="deleteProductButton" text="Delete" onAction="#onDeleteProduct"/>
-            </HBox>
+                <Button fx:id="refreshButton" text="Refresh" onAction="#onRefresh"/>
+            </FlowPane>
         </VBox>
     </top>
 

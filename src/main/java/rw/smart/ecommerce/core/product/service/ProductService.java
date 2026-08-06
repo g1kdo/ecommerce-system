@@ -16,14 +16,29 @@ import java.util.stream.Collectors;
  */
 public class ProductService {
 
+    /**
+     * One cache for the whole application.
+     *
+     * Every screen builds its own ProductService, so a per-instance cache would
+     * make write-through invalidation useless across screens: creating a product
+     * in the product form would update only that controller's copy, leaving the
+     * product list serving a stale snapshot until the app restarted. The cache is
+     * documented as a single-instance, correctness-first cache, and that only
+     * holds if there is genuinely one of it.
+     *
+     * All access happens on the JavaFX application thread; this is not a
+     * thread-safe cache and must not be read or mutated from background threads.
+     */
+    private static final ProductCache SHARED_CACHE = new ProductCache();
+
     private final ProductDAO productDAO;
     private final ProductCache cache;
 
     public ProductService() {
-        this(new ProductDAO(), new ProductCache());
+        this(new ProductDAO(), SHARED_CACHE);
     }
 
-    /** Injection point for tests, which supply a mocked DAO and a real cache. */
+    /** Injection point for tests, which supply a mocked DAO and an isolated cache. */
     public ProductService(ProductDAO productDAO, ProductCache cache) {
         this.productDAO = productDAO;
         this.cache = cache;
@@ -59,6 +74,17 @@ public class ProductService {
     public List<Product> getAllProducts() throws SQLException {
         ensureCacheLoaded();
         return cache.getAll();
+    }
+
+    /**
+     * Discards the cached snapshot and reloads it from the database. Write-through
+     * keeps the cache correct for changes made through this application; this is
+     * the escape hatch for changes made outside it (a direct SQL edit, another
+     * running copy of the app).
+     */
+    public void reloadCache() throws SQLException {
+        cache.clear();
+        ensureCacheLoaded();
     }
 
     /**
