@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Log document mapping, checked against the committed nosql/logs_schema.json shape. */
 class LogMapperTest {
 
-    private static final Path SEED = Path.of("nosql", "logs_schema.json");
+    private static final Path SEED = Path.of("docs", "nosql", "logs_schema.json");
 
     @Test
     @DisplayName("the committed seed document maps onto the model")

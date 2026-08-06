@@ -12,7 +12,7 @@ import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Connection holder for the NoSQL half of the hybrid model (see nosql/).
+ * Connection holder for the NoSQL half of the hybrid model (see docs/nosql/).
  *
  * The document store is treated as optional infrastructure: the client is built
  * lazily and never during class initialization, so an unreachable MongoDB cannot

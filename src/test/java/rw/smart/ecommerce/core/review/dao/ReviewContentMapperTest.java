@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ReviewContentMapperTest {
 
-    private static final Path SEED = Path.of("nosql", "reviews_schema.json");
+    private static final Path SEED = Path.of("docs", "nosql", "reviews_schema.json");
 
     @Test
     @DisplayName("the committed seed document maps onto the model")

@@ -166,6 +166,53 @@ class ProductServiceTest {
     }
 
     @Test
+    @DisplayName("every default-constructed service shares one cache")
+    void defaultConstructorSharesASingleCache() throws Exception {
+        // Regression: a per-instance cache meant a product created in the product
+        // form stayed invisible on the product list, which had warmed its own copy.
+        java.lang.reflect.Field cacheField = ProductService.class.getDeclaredField("cache");
+        cacheField.setAccessible(true);
+
+        Object listScreenCache = cacheField.get(new ProductService());
+        Object productFormCache = cacheField.get(new ProductService());
+
+        assertSame(listScreenCache, productFormCache,
+                "screens each build their own ProductService; they must share one cache");
+    }
+
+    @Test
+    @DisplayName("a product created through one service is visible through another")
+    void writeThroughIsVisibleAcrossServices() throws SQLException {
+        ProductCache sharedCache = new ProductCache();
+        ProductService listScreen = new ProductService(productDAO, sharedCache);
+        ProductService productForm = new ProductService(productDAO, sharedCache);
+
+        when(productDAO.findAll()).thenReturn(List.of(mouse));
+        assertEquals(1, listScreen.search("").size(), "list screen starts with the stored catalogue");
+
+        when(productDAO.insert(any(Product.class))).thenReturn(9);
+        Product fresh = product(0, "Newly Added Gadget", "9.99");
+        productForm.createProduct(fresh);
+
+        List<Product> afterCreate = listScreen.search("");
+        assertEquals(2, afterCreate.size());
+        assertTrue(afterCreate.stream().anyMatch(p -> p.getProductId() == 9),
+                "the newly created product must appear on the list screen");
+    }
+
+    @Test
+    @DisplayName("reloadCache re-reads the catalogue for changes made outside the app")
+    void reloadCacheRefetchesFromTheDatabase() throws SQLException {
+        when(productDAO.findAll()).thenReturn(List.of(mouse), List.of(mouse, keyboard));
+
+        assertEquals(1, productService.getAllProducts().size());
+        productService.reloadCache();
+
+        assertEquals(2, productService.getAllProducts().size());
+        verify(productDAO, times(2)).findAll();
+    }
+
+    @Test
     @DisplayName("a cache miss falls back to the DAO and caches the result")
     void cacheMissFallsBackToDao() throws SQLException {
         // the fetched product must carry id 99 - the cache keys on the entity's own id
