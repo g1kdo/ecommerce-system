@@ -7,11 +7,15 @@ DB design, CRUD, search/sort/caching, performance optimization, and documentatio
 
 ```
 ecommerce-system/
-├── sql/
-│   └── schema.sql            -- DDL: tables, constraints, indexes
-├── nosql/
-│   ├── reviews_schema.json   -- Document schema for flexible review content
-│   └── logs_schema.json      -- Document schema for system access logs
+├── docs/
+│   ├── performance-report.md     -- Epic 4: before/after indexing measurements
+│   ├── sql/
+│   │   ├── schema.sql            -- DDL: tables, constraints, indexes
+│   │   ├── queries.sql           -- Seed data + query patterns
+│   │   └── benchmark_seed.sql    -- 1.55M-row dataset for the performance report
+│   └── nosql/
+│       ├── reviews_schema.json   -- Document schema for flexible review content
+│       └── logs_schema.json      -- Document schema for system access logs
 ├── src/main/java/rw/smart/ecommerce/
 │   ├── Launcher.java             -- main() entry point
 │   ├── MainApplication.java      -- JavaFX Application, opens the sign-in screen
@@ -114,7 +118,7 @@ erDiagram
 
 `ReviewContent` is the NoSQL document half of a review and joins on `review_id`.
 It is intentionally left out of the relational ERD because its free-form content
-belongs in `nosql/reviews_schema.json`, not in the SQL schema.
+belongs in `docs/nosql/reviews_schema.json`, not in the SQL schema.
 
 ## NoSQL Strategy — Reviews & Logs (Hybrid Model)
 
@@ -136,8 +140,8 @@ reviews. This is resolved with a deliberate hybrid, not a contradiction:
 
 | Collection | Schema | Written by | Read by |
 |---|---|---|---|
-| `review_content` | `nosql/reviews_schema.json` | `ReviewContentDAO.save` (upsert) | reviews dialog |
-| `logs` | `nosql/logs_schema.json` | `LogDAO.insert` (append-only) | Activity Log screen |
+| `review_content` | `docs/nosql/reviews_schema.json` | `ReviewContentDAO.save` (upsert) | reviews dialog |
+| `logs` | `docs/nosql/logs_schema.json` | `LogDAO.insert` (append-only) | Activity Log screen |
 
 Logs are the second, purer NoSQL case: high-volume, write-heavy, schema-loose, never
 joined, and read by recency / `user_id` / `event_type` / time range.
@@ -215,8 +219,8 @@ Notes on behaviour worth knowing:
 
 ## Setup Instructions
 
-1. Create the database and run `sql/schema.sql` against PostgreSQL (or adapt syntax for your RDBMS of choice — `SERIAL`/`RETURNING` are Postgres-specific).
-2. Run `sql/queries.sql` to seed sample categories, products, inventory and a user.
+1. Create the database and run `docs/sql/schema.sql` against PostgreSQL (or adapt syntax for your RDBMS of choice — `SERIAL`/`RETURNING` are Postgres-specific).
+2. Run `docs/sql/queries.sql` to seed sample categories, products, inventory and a user.
    (Its `password_hash` is a placeholder, so sign up through the app rather than
    signing in as that seed user.)
 3. Update `src/main/resources/db.properties` with your database URL, username, password, and driver.
@@ -237,11 +241,11 @@ Everything above works without MongoDB. To enable review content and the activit
    collection shapes the app reads:
 
 ```bash
-mongoimport --db smart_ecommerce --collection review_content --file nosql/reviews_schema.json
+mongoimport --db smart_ecommerce --collection review_content --file docs/nosql/reviews_schema.json
 ```
 
 ```bash
-mongoimport --db smart_ecommerce --collection logs --file nosql/logs_schema.json
+mongoimport --db smart_ecommerce --collection logs --file docs/nosql/logs_schema.json
 ```
 
 The `_comment` field in each file is ignored by the mappers. The seed review content
@@ -266,20 +270,39 @@ document DAOs take their `MongoCollection` from an injected supplier.
 | `InventoryServiceTest` | absent row reads as zero, negative stock rejected before the DB, refused decrement becomes `InsufficientStockException` |
 | `ReviewServiceTest` | rating bounds, average rounding, ordering, hybrid write order, partial-failure reporting, degradation when the store is down |
 | `LogServiceTest` | entry contents, unique ids, anonymous events, and that a store failure never propagates |
-| `ReviewContent*Test`, `Log*Test` | mapping against the committed `nosql/*.json` seed files, upsert/edit-history/`$inc` semantics via a mocked collection |
+| `ReviewContent*Test`, `Log*Test` | mapping against the committed `docs/nosql/*.json` seed files, upsert/edit-history/`$inc` semantics via a mocked collection |
 | `CartItemTest`, `MoneyTest`, `RegexValidatorTest`, `CategoryServiceTest` | price snapshotting, money formatting, email rules, delegation |
 
 ## Performance Comparison: Before vs. After Indexing
 
-Run `EXPLAIN ANALYZE` on the queries below (before and after creating the indexes in
-`sql/schema.sql`) and record the output here. Template:
+Full write-up with methodology, plans and raw data:
+**[docs/performance-report.md](docs/performance-report.md)**.
 
-| Query | Before Index (plan/time) | After Index (plan/time) |
-|---|---|---|
-| `LOWER(name) LIKE '%mouse%'` | Seq Scan, ~X ms | Bitmap Index Scan on `idx_products_name_lower`, ~Y ms |
-| `Orders WHERE user_id = ?` | Seq Scan, ~X ms | Index Scan on `idx_orders_user`, ~Y ms |
+Measured on a generated 1.55-million-row dataset (200k products, 600k order items,
+300k reviews) built by [`docs/sql/benchmark_seed.sql`](docs/sql/benchmark_seed.sql).
+Median of 5 runs, warm cache, PostgreSQL 18.1.
+
+| Query | Before index | After index | Speed-up |
+|---|---:|---:|---:|
+| `Products WHERE LOWER(name) = ?` | 160.7 ms (parallel Seq Scan) | 0.359 ms (Index Scan) | **448×** |
+| `Orders WHERE user_id = ?` | 71.6 ms (parallel Seq Scan) | 0.307 ms (Index Scan) | **233×** |
+| `OrderItems WHERE order_id = ?` | 118.1 ms (parallel Seq Scan) | 0.232 ms (Index Scan) | **509×** |
+| Order detail join | 117.3 ms (Hash Join) | 0.202 ms (Nested Loop) | **580×** |
+| `Users WHERE email = ?` (login) | 8.6 ms (Seq Scan) | 0.163 ms (Index Scan) | **53×** |
+| `LOWER(name) LIKE '%mouse%'` | 109.4 ms | 11.2 ms (`pg_trgm` GIN) | **9.7×** |
 
 As table size grows, the sequential scan cost grows linearly (O(n)) while the indexed lookup stays near O(log n) — the gap widens with data volume, which is the core justification for the indexing strategy in Phase 1.
+
+Three findings from that report are worth carrying back into the schema:
+
+1. `idx_products_name_lower` does **not** serve `LIKE '%term%'`, which is what
+   `ProductDAO.searchByName` issues — a leading wildcard cannot use a B-tree. A
+   `pg_trgm` GIN index is what makes that query fast (9.7×).
+2. `idx_reviews_product` is redundant: `UNIQUE (product_id, user_id)` already leads
+   with `product_id`, and the planner uses it when the extra index is dropped.
+3. The largest single cost is not a missing index — it is that every DAO call opens a
+   new JDBC connection (96 ms connect vs 0.26 ms query). A connection pool would help
+   more than any individual index.
 
 ## Caching Behavior
 
@@ -291,11 +314,11 @@ As table size grows, the sequential scan cost grows linearly (O(n)) while the in
 
 | Area | Where addressed |
 |---|---|
-| DB Design (25) | `sql/schema.sql`, ERD above, 3NF justification in Phase 1, hybrid NoSQL rationale above |
-| SQL (20) | `sql/schema.sql`, `sql/queries.sql`, parameterized `PreparedStatement` patterns in every DAO |
-| NoSQL | `nosql/*.json`, `core/review/dao/ReviewContentDAO`, `core/log/`, `utils/MongoConnection` |
+| DB Design (25) | `docs/sql/schema.sql`, ERD above, 3NF justification in Phase 1, hybrid NoSQL rationale above |
+| SQL (20) | `docs/sql/schema.sql`, `docs/sql/queries.sql`, parameterized `PreparedStatement` patterns in every DAO |
+| NoSQL | `docs/nosql/*.json`, `core/review/dao/ReviewContentDAO`, `core/log/`, `utils/MongoConnection` |
 | JavaFX + JDBC (20) | `controller/` (14 screens), `core/*/dao/`, `utils/DBConnection.java` |
 | DSA (15) | `core/product/cache/ProductCache.java`, sort/search logic in `ProductService` |
-| Optimization (10) | Indexing strategy in `sql/schema.sql`; single-query stock load in `InventoryService.getStockByProduct` avoids per-row N+1; async log writes keep the UI thread free |
+| Optimization (10) | [`docs/performance-report.md`](docs/performance-report.md) — measured before/after indexing (up to 853×), plus the N+1 (27.9×) and async-logging (30.6×) wins |
 | Testing | `src/test/java` — 112 JUnit 5 + Mockito tests (see Testing above) |
 | Documentation (10) | This README + inline Javadoc comments |

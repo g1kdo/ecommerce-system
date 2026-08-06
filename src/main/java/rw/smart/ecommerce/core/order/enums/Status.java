@@ -2,7 +2,7 @@ package rw.smart.ecommerce.core.order.enums;
 
 /**
  * Order lifecycle states. These must stay in sync with the CHECK constraint on
- * Orders.status in sql/schema.sql — persisting a value the constraint does not
+ * Orders.status in docs/sql/schema.sql — persisting a value the constraint does not
  * allow fails at the database level.
  */
 public enum Status {

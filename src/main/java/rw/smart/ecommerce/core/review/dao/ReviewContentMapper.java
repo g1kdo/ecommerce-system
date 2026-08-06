@@ -10,7 +10,7 @@ import java.util.List;
 
 /**
  * Translates between {@link ReviewContent} and the BSON document shape in
- * nosql/reviews_schema.json.
+ * docs/nosql/reviews_schema.json.
  *
  * Reads are deliberately lenient — a document store has no schema to enforce, and
  * the seed files use ISO-8601 strings for timestamps while the driver writes real

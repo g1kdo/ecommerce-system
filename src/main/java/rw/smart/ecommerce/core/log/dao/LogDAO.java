@@ -21,7 +21,7 @@ import static com.mongodb.client.model.Filters.lt;
 /**
  * Document-store access for system logs. Writes are append-only and reads are by
  * recency, user, or time range — the access patterns the log schema was chosen
- * for (nosql/logs_schema.json). Nothing here is ever joined relationally.
+ * for (docs/nosql/logs_schema.json). Nothing here is ever joined relationally.
  */
 public class LogDAO {
 

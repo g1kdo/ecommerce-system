@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /**
  * The variable-shape half of a review, stored as a document (see
- * nosql/reviews_schema.json). The rating and its foreign keys stay in the
+ * docs/nosql/reviews_schema.json). The rating and its foreign keys stay in the
  * relational {@link Review} row; everything here — free text, photos, votes,
  * seller responses, edit history — would otherwise need a wide table of nullable
  * columns or an EAV table.

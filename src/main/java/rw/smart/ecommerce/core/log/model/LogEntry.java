@@ -5,7 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * One system log document (see nosql/logs_schema.json): write-heavy, never joined,
+ * One system log document (see docs/nosql/logs_schema.json): write-heavy, never joined,
  * and read by time range or user. {@code eventType} is held as a String rather
  * than an enum so a value this build does not know about still reads back.
  */

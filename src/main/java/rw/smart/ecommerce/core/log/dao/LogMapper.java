@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * Translates between {@link LogEntry} and the document shape in
- * nosql/logs_schema.json. Like review content, reads accept either BSON dates or
+ * docs/nosql/logs_schema.json. Like review content, reads accept either BSON dates or
  * ISO-8601 strings so hand-written seed documents load unchanged.
  */
 public final class LogMapper {

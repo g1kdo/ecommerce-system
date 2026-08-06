@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
  * Relational shell for a review — only the fields that need referential
  * integrity and SQL aggregation (AVG rating). Free-form review content
  * (body text, photos, votes) is stored in the NoSQL document store —
- * see nosql/reviews_schema.json.
+ * see docs/nosql/reviews_schema.json.
  */
 public class Review {
 
