@@ -1,0 +1,12 @@
+{
+  "_comment": "High-volume, write-heavy, schema-loose system logs. Never joined relationally; read by time-range or user_id scan, so a document store avoids B-tree write amplification on a fast-growing table.",
+  "log_id": "log_9f3a2b1c",
+  "timestamp": "2026-08-02T10:15:00Z",
+  "user_id": 88,
+  "event_type": "PRODUCT_SEARCH",
+  "details": {
+    "query": "wireless mouse",
+    "results_count": 34,
+    "cache_hit": true
+  }
+}
