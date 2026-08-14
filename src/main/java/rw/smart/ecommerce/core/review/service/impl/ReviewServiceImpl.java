@@ -21,7 +21,10 @@ import rw.smart.ecommerce.utils.exceptions.ResourceNotFoundException;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Reviews straddle both stores: the identifiers are validated against
@@ -96,6 +99,29 @@ public class ReviewServiceImpl implements ReviewService {
     @Cacheable(value = CacheConfig.REVIEW_SUMMARIES, key = "#productId")
     public ReviewSummaryResponse summarize(Long productId) {
         return reviewRepository.summarize(productId);
+    }
+
+    /**
+     * Deliberately not {@code @Cacheable}. A cache keyed on the whole id
+     * collection would almost never be hit — every distinct page, filter and sort
+     * order produces a different key — while still holding one entry per
+     * combination. The batching is where the saving comes from; the per-product
+     * {@link #summarize} above remains cached for the single-product path.
+     */
+    @Override
+    public Map<Long, ReviewSummaryResponse> summarizeAll(Collection<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) return Map.of();
+
+        Map<Long, ReviewSummaryResponse> found = reviewRepository.summarizeAll(productIds);
+
+        // A product with no reviews yields no aggregation row. The GraphQL field is
+        // non-null, so those have to become an explicit zero rather than a gap -
+        // otherwise the whole query fails on the first unreviewed product.
+        Map<Long, ReviewSummaryResponse> complete = new LinkedHashMap<>();
+        for (Long productId : productIds) {
+            complete.put(productId, found.getOrDefault(productId, ReviewSummaryResponse.empty(productId)));
+        }
+        return complete;
     }
 
     @Override

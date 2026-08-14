@@ -1,0 +1,195 @@
+# ============================================================
+# Smart E-Commerce System — GraphQL schema
+# ============================================================
+# Timestamps are exposed as ISO-8601 strings so no custom scalar is needed;
+# money is a Float on the wire and BigDecimal everywhere behind it.
+
+type Category {
+    id: ID!
+    name: String!
+    description: String
+}
+
+type Product {
+    id: ID!
+    name: String!
+    description: String
+    price: Float!
+    # Generated server-side as CAT-YYMM-NNNNN; read-only.
+    sku: String!
+    category: Category!
+    stockQuantity: Int!
+    createdAt: String!
+
+    # Resolved only when asked for, and batched across the whole page by
+    # @BatchMapping - one MongoDB aggregation per query rather than one per
+    # product. See ReviewGraphQLController.reviewSummary.
+    reviewSummary: ReviewSummary!
+}
+
+type ProductPage {
+    content: [Product!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+type User {
+    id: ID!
+    username: String!
+    email: String!
+    fullName: String!
+    phone: String
+    role: UserRole!
+    createdAt: String!
+}
+
+type OrderItem {
+    id: ID!
+    productId: ID!
+    productName: String!
+    quantity: Int!
+    unitPrice: Float!
+    lineTotal: Float!
+}
+
+type Order {
+    id: ID!
+    userId: ID!
+    status: OrderStatus!
+    totalAmount: Float!
+    orderDate: String!
+    items: [OrderItem!]!
+}
+
+type Review {
+    id: ID!
+    productId: ID!
+    userId: ID!
+    rating: Int!
+    title: String
+    comment: String
+    tags: [String!]!
+    helpfulVotes: Int!
+    createdAt: String!
+}
+
+type ReviewSummary {
+    productId: ID!
+    reviewCount: Int!
+    averageRating: Float!
+}
+
+enum UserRole {
+    ADMIN
+    CUSTOMER
+}
+
+enum OrderStatus {
+    PENDING
+    PAID
+    SHIPPED
+    DELIVERED
+    CANCELLED
+}
+
+# ---------- Inputs ----------
+
+input ProductFilterInput {
+    keyword: String
+    categoryId: ID
+    minPrice: Float
+    maxPrice: Float
+    page: Int = 0
+    size: Int = 20
+    sortBy: String = "id"
+    direction: String = "ASC"
+}
+
+input ProductInput {
+    name: String!
+    description: String
+    price: Float!
+    # No sku: it is generated server-side as CAT-YYMM-NNNNN and is read-only.
+    categoryId: ID!
+    initialStock: Int = 0
+}
+
+input CategoryInput {
+    name: String!
+    description: String
+}
+
+input UserInput {
+    username: String!
+    email: String!
+    password: String!
+    fullName: String!
+    phone: String
+    role: UserRole!
+}
+
+input OrderItemInput {
+    productId: ID!
+    quantity: Int!
+}
+
+input OrderInput {
+    userId: ID!
+    items: [OrderItemInput!]!
+}
+
+input ReviewInput {
+    productId: ID!
+    userId: ID!
+    rating: Int!
+    title: String
+    comment: String
+    tags: [String!]
+}
+
+# ---------- Operations ----------
+
+type Query {
+    # Customer catalogue
+    products(filter: ProductFilterInput): ProductPage!
+    product(id: ID!): Product!
+    categories: [Category!]!
+    category(id: ID!): Category!
+
+    # Reviews
+    reviewsByProduct(productId: ID!, page: Int = 0, size: Int = 20): [Review!]!
+    reviewSummary(productId: ID!): ReviewSummary!
+
+    # Orders
+    ordersByUser(userId: ID!): [Order!]!
+    order(id: ID!): Order!
+
+    # Administration
+    users: [User!]!
+    user(id: ID!): User!
+}
+
+type Mutation {
+    createProduct(input: ProductInput!): Product!
+    updateProduct(id: ID!, input: ProductInput!): Product!
+    deleteProduct(id: ID!): Boolean!
+
+    createCategory(input: CategoryInput!): Category!
+    updateCategory(id: ID!, input: CategoryInput!): Category!
+    deleteCategory(id: ID!): Boolean!
+
+    createUser(input: UserInput!): User!
+    deleteUser(id: ID!): Boolean!
+
+    adjustStock(productId: ID!, quantity: Int!): Int!
+
+    placeOrder(input: OrderInput!): Order!
+    updateOrderStatus(id: ID!, status: OrderStatus!): Order!
+
+    addReview(input: ReviewInput!): Review!
+    markReviewHelpful(id: ID!): Review!
+    deleteReview(id: ID!): Boolean!
+}

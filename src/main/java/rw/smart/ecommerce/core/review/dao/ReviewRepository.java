@@ -18,9 +18,13 @@ import org.springframework.stereotype.Repository;
 import rw.smart.ecommerce.config.MongoSettings;
 import rw.smart.ecommerce.core.review.model.Review;
 import rw.smart.ecommerce.core.review.dto.ReviewSummaryResponse;
+import rw.smart.ecommerce.utils.BsonValues;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -122,6 +126,42 @@ public class ReviewRepository {
 
         // Two decimals is what a product page displays; more is false precision.
         return new ReviewSummaryResponse(productId, count, Math.round(average * 100.0) / 100.0);
+    }
+
+    /**
+     * The same aggregation for many products at once — one round trip instead of
+     * one per product.
+     *
+     * This is the query behind the {@code Product.reviewSummary} batch loader. A
+     * catalogue page of 20 products asking for its star ratings runs this once;
+     * resolving the field product by product would run {@link #summarize} twenty
+     * times against the same collection.
+     *
+     * Products with no reviews are absent from the pipeline output, so the caller
+     * fills those in — an empty result and a missing result mean the same thing
+     * here, and the difference must not leak out as a null.
+     */
+    public Map<Long, ReviewSummaryResponse> summarizeAll(Collection<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) return Map.of();
+
+        List<Bson> pipeline = List.of(
+                new Document("$match", new Document(ReviewMapper.PRODUCT_ID,
+                        new Document("$in", List.copyOf(productIds)))),
+                new Document("$group", new Document("_id", "$" + ReviewMapper.PRODUCT_ID)
+                        .append("reviewCount", new Document("$sum", 1))
+                        .append("averageRating", new Document("$avg", "$" + ReviewMapper.RATING))));
+
+        Map<Long, ReviewSummaryResponse> summaries = new HashMap<>();
+        for (Document result : collection().aggregate(pipeline)) {
+            Long productId = BsonValues.readNullableLong(result.get("_id"));
+            if (productId == null) continue;
+
+            long count = result.get("reviewCount") instanceof Number n ? n.longValue() : 0L;
+            double average = result.get("averageRating") instanceof Number n ? n.doubleValue() : 0.0;
+            summaries.put(productId, new ReviewSummaryResponse(
+                    productId, count, Math.round(average * 100.0) / 100.0));
+        }
+        return summaries;
     }
 
     /** Atomic {@code $inc} so concurrent votes cannot overwrite each other. */
