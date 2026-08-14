@@ -23,9 +23,9 @@ public record ProductRequest(
         @Digits(integer = 10, fraction = 2, message = "Price must have at most 2 decimal places")
         BigDecimal price,
 
-        @NotBlank(message = "SKU is required")
-        @Size(max = 40, message = "SKU must not exceed 40 characters")
-        String sku,
+        // No sku field: it is derived by SkuGenerator at creation and never
+        // supplied by a caller. Accepting one would mean trusting clients to keep
+        // a global uniqueness rule, which is the database's job, not theirs.
 
         @NotNull(message = "Category is required")
         Long categoryId,

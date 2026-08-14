@@ -23,10 +23,13 @@ import rw.smart.ecommerce.core.product.dao.ProductRepository;
 import rw.smart.ecommerce.core.review.dao.ReviewRepository;
 import rw.smart.ecommerce.core.product.dao.spec.ProductSpecifications;
 import rw.smart.ecommerce.core.product.service.ProductService;
+import rw.smart.ecommerce.core.product.service.SkuGenerator;
 import rw.smart.ecommerce.utils.exceptions.DuplicateResourceException;
 import rw.smart.ecommerce.utils.exceptions.ResourceNotFoundException;
 
+import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -58,9 +61,6 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public ProductResponse create(ProductRequest request) {
-        if (productRepository.existsBySkuIgnoreCase(request.sku()))
-            throw new DuplicateResourceException("SKU already in use: " + request.sku());
-
         Category category = categoryRepository.findById(request.categoryId())
                 .orElseThrow(() -> ResourceNotFoundException.of("Category", request.categoryId()));
 
@@ -68,10 +68,22 @@ public class ProductServiceImpl implements ProductService {
         product.setName(request.name());
         product.setDescription(request.description());
         product.setPrice(request.price());
-        product.setSku(request.sku());
         product.setCategory(category);
 
+        // The SKU embeds the product id, and the id only exists after the insert -
+        // so the row is written once to obtain it, then stamped with the real SKU.
+        // Deriving the SKU from the primary key is what makes it unique without a
+        // lookup, a counter table, or a retry on collision.
+        //
+        // The placeholder exists only to satisfy the NOT NULL and UNIQUE
+        // constraints for the width of this transaction. Relaxing the column to
+        // nullable would be the easier change and the wrong one: it would leave
+        // the database unable to reject a product with no SKU at all.
+        product.setSku(temporarySku());
         Product saved = productRepository.save(product);
+
+        saved.setSku(SkuGenerator.generate(category, saved.getId(), LocalDate.now()));
+        saved = productRepository.save(saved);
 
         // Every product gets an inventory row up front so stock lookups never have
         // to special-case a missing row later.
@@ -92,18 +104,16 @@ public class ProductServiceImpl implements ProductService {
         Product product = productRepository.findWithCategoryById(id)
                 .orElseThrow(() -> ResourceNotFoundException.of("Product", id));
 
-        if (!product.getSku().equalsIgnoreCase(request.sku())
-                && productRepository.existsBySkuIgnoreCase(request.sku()))
-            throw new DuplicateResourceException("SKU already in use: " + request.sku());
-
         Category category = categoryRepository.findById(request.categoryId())
                 .orElseThrow(() -> ResourceNotFoundException.of("Category", request.categoryId()));
 
         product.setName(request.name());
         product.setDescription(request.description());
         product.setPrice(request.price());
-        product.setSku(request.sku());
         product.setCategory(category);
+        // The SKU is deliberately not touched. It is printed on labels and
+        // recorded against past order lines; changing it because the product moved
+        // category would invalidate both.
 
         Product saved = productRepository.save(product);
         // initialStock is intentionally ignored on update — stock is adjusted
@@ -163,6 +173,15 @@ public class ProductServiceImpl implements ProductService {
         } catch (RuntimeException e) {
             log.warn("Product {} was deleted but its review documents could not be removed: {}", id, e.getMessage());
         }
+    }
+
+    /**
+     * Never reaches a client and never survives the transaction that created it.
+     * A random suffix rather than a fixed string, so two concurrent creates cannot
+     * collide on the unique index before either has its real SKU.
+     */
+    private String temporarySku() {
+        return "TMP-" + UUID.randomUUID();
     }
 
     private int currentStock(Long productId) {

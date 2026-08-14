@@ -27,11 +27,24 @@ public class OrderGraphQLController {
         this.orderService = orderService;
     }
 
+    /*
+     * These two queries carry their own authorisation and must keep it.
+     *
+     * The URL rules in SecurityConfig protect /api/v1/orders/**, but GraphQL is a
+     * single POST to /graphql that has to stay open for the public catalogue
+     * queries — so no path rule can distinguish "list categories" from "read a
+     * stranger's order history". Authorisation for GraphQL lives here or nowhere,
+     * and leaving it off made order history world-readable while the equivalent
+     * REST endpoint correctly answered 401.
+     */
+
+    @PreAuthorize("isAuthenticated()")
     @QueryMapping
     public List<OrderResponse> ordersByUser(@Argument Long userId) {
         return orderService.findByUser(userId);
     }
 
+    @PreAuthorize("isAuthenticated()")
     @QueryMapping
     public OrderResponse order(@Argument Long id) {
         return orderService.findById(id);
