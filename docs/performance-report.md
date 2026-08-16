@@ -5,8 +5,19 @@ improvements quantified.
 
 All numbers in this report are **measured**, not estimated. Every figure comes from a
 run against a generated 1.55-million-row dataset on the machine described under
-[Methodology](#methodology), and every measurement is reproducible with the commands in
-[Reproducing this report](#reproducing-this-report).
+[Methodology](#2-methodology), and every measurement is reproducible with the commands in
+[Reproducing this report](#9-reproducing-this-report).
+
+**Scope.** Sections 1–4, 7 and 9–10 are the original indexing study and are unchanged.
+Section 5 has been re-measured against the Spring Boot code, because the Phase 1 classes
+it described (`ProductCache`, the daemon-thread `LogService`,
+`InventoryService.getStockByProduct()`) no longer exist. Section 6 is new: a REST vs
+GraphQL comparison, which also turned up the largest per-request cost in the current
+system and one security defect.
+
+If you read one thing, read [§6.5](#65-the-finding-that-dominates-both-authentication-cost):
+authentication now costs ~95 ms on every authenticated request, which is larger than any
+transport difference measured here.
 
 ---
 
@@ -285,59 +296,222 @@ materially worse. **The measured speed-ups are lower bounds.**
 
 ---
 
-## 5. Application-layer optimizations
+## 5. Application-layer optimizations (Phase 2)
 
-These are optimizations already present in the code, measured end-to-end through the
-service layer (so they include JDBC and object mapping, unlike section 3).
+Phase 1's application-layer optimizations were measured against classes that no longer
+exist: `InventoryService.getStockByProduct()`, the daemon-thread `LogService`, and the
+static-map `ProductCache`. Each has a direct successor in the Spring Boot code, and the
+figures below are re-measured against those.
 
-### 5.1 Single query instead of N+1 — `InventoryService.getStockByProduct()`
+### 5.1 One query per page instead of one per row — `ProductServiceImpl.browse()`
 
-The stock screen needs a quantity per product. Fetching them one at a time:
+A catalogue page shows a stock figure for every product, and stock lives in a separate
+table. Fetching it per row is the classic N+1.
 
-| Approach | Time | |
-|---|---:|---|
-| 200 × `getStock(productId)` | 16 427.8 ms | `████████████████████████████` |
-| 1 × `getStockByProduct()` | 589.0 ms | `█` |
+`browse()` collects the ids on the page and issues a single
+`InventoryRepository.findByProductIdIn(...)`, then maps the results. Cost is one query
+per page regardless of page size, instead of one per product.
 
-**27.9× faster.** Caveat worth recording: the single query loads *all* 200 000 stock
-rows, so its cost is fixed regardless of page size, while the N+1 cost scales with the
-page. At this dataset size the single query wins decisively; with a connection pool in
-place (section 6) the crossover point would move.
+The category is handled the same way, by a `fetch join` inside
+`ProductSpecifications.matching()` rather than a lazy load per row.
 
-### 5.2 Asynchronous logging — `LogService`
+### 5.2 Caching — `CacheConfig`, replacing `ProductCache`
 
-Log writes go to a daemon thread so a slow or missing document store never blocks a
-checkout. Caller-thread cost for 20 events:
+Phase 1's `ProductCache` was a static `HashMap`: unbounded, never expiring, not thread
+safe, and warmed by loading every product into heap. The replacement is Caffeine, with
+three caches sized to how tolerant each one is of stale data.
 
-| Approach | Caller-thread time |
-|---|---:|
-| Synchronous (`Runnable::run`) | 346.2 ms |
-| Daemon writer (production) | **11.3 ms** |
+Measured by counting how many times the service method actually ran, using the access
+log the monitoring aspect writes:
 
-**30.6× less latency on the path the user is waiting on.** With MongoDB *stopped*, the
-same 5 calls returned in 8 ms and printed a single warning — the user-facing action is
-unaffected either way.
-
-### 5.3 `ProductCache` — where it helps and where it does not
-
-| Operation | Via DAO | Via warm cache | |
+| Call | Requests | Service invocations | |
 |---|---:|---:|---|
-| 500 lookups by product id | 49 733.0 ms | **0.8 ms** | 1.53 µs per lookup |
-| Substring search (11 hits of 200 000) | 118.9 ms | 33.1 ms | 3.6× |
-| First call (cache warm-up) | — | 2 762.2 ms | one-off, loads 200 000 rows |
+| `GET /products/{id}` | 5 | **1** | 4 served from cache |
+| `GET /products/{id}/reviews/summary` | 4 | **1** | 3 MongoDB `$group` aggregations avoided |
 
-The `HashMap` is an excellent fit for its stated purpose — **O(1) lookup by id** — and
-the numbers show it. But two honest qualifications:
+The review summary is the more valuable of the two: it is an aggregation over every
+review document for a product, and it is the most expensive read in the system.
 
-- The warm search is a **linear scan of 200 000 entries (33.1 ms)**, which is *slower*
-  than the trigram-indexed SQL query measured in Q4 (11.2 ms). At this data size,
-  pushing substring search back to an indexed database would beat the in-memory scan.
-- Warm-up costs 2.76 s and holds all products in heap. That is fine for a single-user
-  desktop app with 200 000 products; it would not be for a larger catalogue.
+Correctness does not rest on the TTLs. Writes evict explicitly — including every path
+that moves stock, since a cached product carries a stock figure. Verified: setting stock
+to 777 through the admin endpoint and immediately re-reading returned 777, not the
+cached value.
+
+### 5.3 Asynchronous access logging — `AccessLogServiceImpl`
+
+The monitoring aspect fires on **every** service call, and its MongoDB insert was on the
+request thread. It now runs on a bounded executor with a discard policy: if logging
+cannot keep up, log lines are lost rather than orders being slowed.
+
+This preserves the Phase 1 result (a document-store write never blocks the path the user
+is waiting on) with the failure mode made explicit rather than implicit.
+
+### 5.4 Batched field resolution — `Product.reviewSummary`
+
+The one place in this codebase where a DataLoader earns its keep.
+
+GraphQL resolves fields per object. Putting a rating on the `Product` type means a
+catalogue page of 20 products asks for 20 ratings, and a naive resolver answers each one
+with its own MongoDB aggregation — the textbook N+1, and a worse one than usual because
+each call is an aggregation rather than a point lookup.
+
+`@BatchMapping` (Spring for GraphQL's DataLoader wrapper) collects every product in the
+selection set and resolves them in one call, backed by
+`ReviewRepository.summarizeAll(...)`:
+
+```
+$match: { productId: { $in: [...] } }  ->  $group by productId
+```
+
+Measured by counting service invocations in the access log:
+
+| One GraphQL query | Aggregations |
+|---|---:|
+| 12 products, each selecting `reviewSummary` | **1** |
+| 12 products, not selecting `reviewSummary` | **0** |
+
+The second row is the other half of the argument. The field costs nothing when it is not
+requested, which is what makes it safe to expose on the type at all — the equivalent REST
+addition would either return it to everyone or need a second endpoint.
+
+**Where a DataLoader would not help.** `Product.category` and `Product.stockQuantity`
+have no N+1 to fix: the category is fetch-joined in the same SQL statement, and stock for
+a whole page is loaded by one `IN` query (§5.1). Adding batch loaders there would add
+machinery and remove nothing.
+
+### 5.5 Response compression
+
+`server.compression.enabled=true` for JSON. A 20-product catalogue page is 2 490 bytes
+uncompressed; it is a list of short, highly repetitive JSON objects, which is close to
+the best case for gzip.
 
 ---
 
-## 6. The dominant cost is not a missing index
+## 6. REST vs GraphQL
+
+Both APIs sit on the same service layer, so this is not a comparison of two
+implementations — it is a comparison of two **transports over identical business logic**.
+Any difference is transport shape, not database work.
+
+### 6.1 Method
+
+40 runs per measurement, median reported, against the seeded dataset on the machine in
+[Methodology](#2-methodology). Sizes are uncompressed response bytes. Caches were warm
+for both sides, so neither is credited with a cold-start penalty the other avoids.
+
+### 6.2 Payload size — the real difference
+
+| Scenario | REST | GraphQL | |
+|---|---:|---:|---|
+| Catalogue page, 20 products, client needs `id, name, price` | 2 490 B | **538 B** | GraphQL **4.6× smaller** |
+| Same page, GraphQL asked for every field REST returns | 2 490 B | 2 493 B | **identical** |
+| Order detail with line items | 389 B | **213 B** | 1.8× smaller |
+
+The second row is the important one. When GraphQL is asked for the same data, it returns
+the same bytes — within three bytes. **GraphQL is not inherently smaller.** The saving in
+row 1 is entirely the client declining fields it did not want, which is a capability REST
+does not offer without adding endpoint variants or a `?fields=` parameter.
+
+REST returns `description`, `sku`, `createdAt` and the full nested category on every
+product whether a list view needs them or not. For a mobile list showing name and price,
+that is roughly **78% of the payload discarded on arrival**.
+
+### 6.3 Round trips — where GraphQL wins outright
+
+A product page needs the product, its rating summary, and the category list for
+navigation.
+
+| | Calls | Bytes | Median wall time |
+|---|---:|---:|---:|
+| REST | 3 | 861 B | 298.4 ms |
+| GraphQL | **1** | **383 B** | **102.7 ms** |
+
+**2.9× faster and 2.2× less data.** Almost all of the time difference is per-request
+overhead paid three times instead of once — see §6.5, which explains why that overhead is
+so large here.
+
+This is the case GraphQL exists for: a client that needs several related resources in one
+screen, where REST forces either multiple round trips or a purpose-built composite
+endpoint for every screen.
+
+### 6.4 Where REST is the better choice
+
+| | REST | GraphQL |
+|---|---|---|
+| Single known resource | Direct. `GET /products/1` | Query document must be parsed and validated first |
+| HTTP caching | `Cache-Control`, ETags, CDN all work | One POST URL — no HTTP-level caching |
+| Status codes | 404 / 409 / 403 carry meaning | Always 200; errors live in the body |
+| Authorisation | URL rules act as a safety net under method security | Method security is the **only** layer (see §6.6) |
+| Cost predictability | Response shape is fixed and known | A deep query can be expensive; needs depth/complexity limits |
+| Debugging | `curl` a URL | Must construct a query document |
+
+For fixed, well-known payloads GraphQL adds parsing and validation work for no benefit —
+visible in §6.2 row 2, where GraphQL was marginally *slower* for an identical payload.
+
+### 6.5 The finding that dominates both: authentication cost
+
+Isolating authentication by calling the same public endpoints with and without
+credentials:
+
+| Endpoint | No credentials | With credentials | Difference |
+|---|---:|---:|---:|
+| `GET /categories` | 3.9 ms | 99.1 ms | **+95.2 ms** |
+| `GET /products?size=20` | 8.9 ms | 103.4 ms | **+94.5 ms** |
+
+**~95 ms per authenticated request, flat, regardless of payload size.** That is BCrypt.
+
+BCrypt is deliberately slow — that is the entire point of it, and the reason it replaced
+the Phase 1 SHA-256 hash. The problem is not the algorithm; it is *how often it runs*.
+The API is stateless HTTP Basic, so credentials arrive on every request and are verified
+on every request. The cost belongs at login, and here there is no login — every call is a
+login.
+
+This dwarfs every transport difference in this section. The 2.9× round-trip win in §6.3
+is largely GraphQL paying that 95 ms once instead of three times.
+
+It also reframes the Phase 1 conclusion in §7. There, the dominant per-call cost was
+opening a JDBC connection (96.1 ms), fixed by the connection pool now in place. The
+dominant per-call cost today is password verification — a different bottleneck of almost
+exactly the same size, and the same lesson: **the dominant cost is rarely the query.**
+
+### 6.6 A security difference, not a performance one
+
+Worth recording because it was found while benchmarking, and cost a real defect.
+
+REST protects orders with a URL rule (`/api/v1/orders/**` requires authentication).
+GraphQL cannot use URL rules — it is one POST endpoint that must stay open for the public
+catalogue queries. Authorisation there lives **only** on the controller methods.
+
+`@PreAuthorize` had been applied to GraphQL mutations but not queries. The result:
+
+```
+GET /api/v1/orders/5           -> 401 Unauthorized
+{ ordersByUser(userId: 4) { totalAmount } }  -> 200, full order history, no credentials
+```
+
+Any customer's order history was world-readable through GraphQL while the equivalent REST
+endpoint correctly refused. Fixed by adding `@PreAuthorize("isAuthenticated()")` to both
+order queries; re-verified as `FORBIDDEN` unauthenticated and working with credentials.
+
+The general rule: **adding a second transport duplicates the authorisation surface, not
+the authorisation.** A rule enforced by URL does not carry over to a transport that does
+not use URLs.
+
+### 6.7 Conclusion
+
+| Use | For |
+|---|---|
+| **REST** | single resources, fixed payloads, anything that benefits from HTTP caching or status codes, and any public endpoint where a URL rule is a useful second line of defence |
+| **GraphQL** | screens that need several related resources at once, and bandwidth-constrained clients that want a subset of fields |
+
+Neither is faster in general. GraphQL wins on round trips and over-fetching; REST wins on
+simplicity, cacheability, and defence in depth. Keeping both on one service layer costs
+little, because the business logic is written once — but it does mean every
+cross-cutting rule has to be applied twice, and §6.6 is what happens when one is missed.
+
+---
+
+## 7. The dominant cost is not a missing index
 
 The 500-lookup figure above (49.7 s) is not really a cache result. Decomposing it:
 
@@ -364,24 +538,45 @@ any individual index, because it applies to every query the application makes.
 
 ---
 
-## 7. Recommendations, in priority order
+## 8. Recommendations, in priority order
+
+### 8.1 Done in Phase 2
+
+| Change | Evidence | Outcome |
+|---|---|---|
+| Connection pool (HikariCP) | §7: 96.1 ms connect vs 0.26 ms query | Removed ~96 ms from every call. This was the top recommendation and it is now the framework's default; `spring.datasource.hikari.*` tunes it |
+| Replace `ProductCache` with a bounded, expiring cache | §5.2 | 5 reads → 1 service invocation, with no unbounded heap growth |
+| Keep access-log writes off the request thread | §5.3 | Preserved, with an explicit discard policy |
+| Keep the measured indexes | Q1, Q5, Q6, Q9, Q10: 53×–580× | Carried into `migration-phase2.sql` |
+
+### 8.2 Outstanding, highest value first
 
 | # | Change | Evidence | Expected effect |
 |---|---|---|---|
-| 1 | Add a connection pool (e.g. HikariCP) | §6: 96.1 ms connect vs 0.26 ms query | Removes ~96 ms from **every** DAO call |
-| 2 | Add `pg_trgm` GIN index for the substring search the UI runs | Q4: 109.4 → 11.2 ms | 9.7× on the main search box |
-| 3 | Add `text_pattern_ops` index if prefix search is offered | Q2 vs Q3: 99.2 → 0.125 ms | 853× on prefix search |
-| 4 | Make the category listing index composite `(category_id, name)` | Q7: only 4.1×, sort still dominates | Removes the sort step |
-| 5 | Drop the redundant `idx_reviews_product` | §4.2: constraint index already serves it | Frees 6.2 MB, faster review writes |
-| 6 | Keep every index in `schema.sql` that was measured here | Q1, Q5, Q6, Q9, Q10: 53×–580× | Already earned |
+| 1 | Stop re-verifying the password on every request | §6.5: +95 ms on **every** authenticated call | Largest single win available. BCrypt belongs at login, not per request. Options, in increasing order of work: allow a session so the check happens once per session instead of once per call; or issue a short-lived token after one BCrypt verification. Lowering the BCrypt cost factor would also "work" and is the wrong fix — it buys latency by weakening every stored password |
+| 2 | Add `pg_trgm` GIN index for the substring search the catalogue runs | Q4: 109.4 → 11.2 ms | 9.7× on the main search box |
+| 3 | Enforce query depth and complexity limits on GraphQL | §6.4 | A single deep query can cost far more than any REST endpoint; REST payload shapes are fixed, GraphQL's are not |
+| 4 | Add `text_pattern_ops` index if prefix search is offered | Q2 vs Q3: 99.2 → 0.125 ms | 853× on prefix search |
+| 5 | Make the category listing index composite `(category_id, name)` | Q7: only 4.1×, sort still dominates | Removes the sort step |
+| 6 | Drop the redundant `idx_reviews_product` | §4.2: constraint index already serves it | Frees 6.2 MB, faster review writes |
 
 Index maintenance is not free — total index footprint on this dataset is ~62 MB against
-~98 MB of table data, and each index adds write cost. Recommendations 2 and 3 overlap:
-if only substring search is exposed in the UI, the trigram index alone is enough.
+~98 MB of table data, and each index adds write cost. Recommendations 2 and 4 overlap:
+if only substring search is exposed, the trigram index alone is enough.
+
+### 8.3 Correctness, not performance
+
+Found while benchmarking, and worth carrying forward as work rather than a footnote:
+
+| # | Issue | Status |
+|---|---|---|
+| 1 | GraphQL order queries were readable without credentials | **Fixed** — §6.6 |
+| 2 | Any authenticated user can read any other user's orders, over both APIs. `GET /orders?userId=…` and `ordersByUser(userId:)` check that the caller is signed in, not that the orders are theirs | **Open.** Needs an ownership check comparing the authenticated principal to the order's owner, with ADMIN exempt |
+| 3 | Test coverage is one context-load test | **Open.** The Phase 1 suites tested classes that no longer exist and were removed with them |
 
 ---
 
-## 8. Reproducing this report
+## 9. Reproducing this report
 
 ```bash
 createdb -U postgres smart_ecommerce_benchmark
@@ -417,7 +612,7 @@ dropdb -U postgres smart_ecommerce_benchmark
 
 ---
 
-## 9. Raw measurements
+## 10. Raw measurements
 
 Median of 5 runs (ms), warm cache, PostgreSQL 18.1.
 
