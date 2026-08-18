@@ -2,6 +2,7 @@ package rw.smart.ecommerce.core.inventory.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import rw.smart.ecommerce.config.CacheConfig;
@@ -35,7 +36,11 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     @Override
-    @CacheEvict(value = CacheConfig.PRODUCTS, key = "#productId")
+    @Caching(evict = {
+            @CacheEvict(value = CacheConfig.PRODUCTS, key = "#productId"),
+            // The reorder report and the stock-distribution report are both
+            // functions of this number.
+            @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true)})
     @Transactional
     public int setStock(Long productId, int quantity) {
         if (quantity < 0) throw new InvalidInputException("Stock quantity cannot be negative.");
@@ -59,7 +64,11 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     @Override
-    @CacheEvict(value = CacheConfig.PRODUCTS, key = "#productId")
+    @Caching(evict = {
+            @CacheEvict(value = CacheConfig.PRODUCTS, key = "#productId"),
+            // The reorder report and the stock-distribution report are both
+            // functions of this number.
+            @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true)})
     @Transactional
     public void reduceStock(Long productId, int amount) {
         if (amount <= 0) throw new InvalidInputException("Amount to remove must be greater than zero.");

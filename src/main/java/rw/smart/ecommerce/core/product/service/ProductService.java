@@ -5,6 +5,9 @@ import rw.smart.ecommerce.core.product.dto.ProductFilter;
 import rw.smart.ecommerce.core.product.dto.ProductRequest;
 import rw.smart.ecommerce.core.product.dto.LowStockResponse;
 import rw.smart.ecommerce.core.product.dto.ProductResponse;
+import rw.smart.ecommerce.core.report.dto.ReportDtos.RelatedProductResponse;
+
+import java.util.List;
 
 public interface ProductService {
 
@@ -27,6 +30,15 @@ public interface ProductService {
      * nobody knows in advance how many products are short.
      */
     PageResponse<LowStockResponse> findLowStock(Integer threshold, Integer page, Integer size);
+
+    /**
+     * The "customers also bought" strip: products that appear in the same orders
+     * as this one, most frequently paired first.
+     *
+     * Derived from order history rather than the catalogue, which is why editing
+     * a product does not invalidate it.
+     */
+    List<RelatedProductResponse> findRelated(Long id, Integer limit);
 
     void delete(Long id);
 }

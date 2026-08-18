@@ -3,9 +3,13 @@ package rw.smart.ecommerce.core.user.service.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import rw.smart.ecommerce.config.CacheConfig;
 import rw.smart.ecommerce.utils.pagination.PaginationSupport;
 import rw.smart.ecommerce.core.user.model.User;
 import rw.smart.ecommerce.utils.response.PageResponse;
@@ -61,6 +65,10 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    // The updated profile is exactly what findById would return next, so the
+    // entry is replaced rather than dropped. A rollback cannot leave a rejected
+    // value cached: the cache manager defers the put until commit.
+    @CachePut(value = CacheConfig.PROFILES, key = "#id")
     @Transactional
     public UserResponse update(Long id, UserRequest request) {
         User user = userRepository.findById(id)
@@ -87,6 +95,10 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    // A profile is read on every administrative screen that shows a name
+    // against an order, and it changes when the account holder edits it -
+    // which is rare and always goes through update() above.
+    @Cacheable(value = CacheConfig.PROFILES, key = "#id")
     @Transactional(readOnly = true)
     public UserResponse findById(Long id) {
         return userRepository.findById(id)
@@ -116,6 +128,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @CacheEvict(value = CacheConfig.PROFILES, key = "#id")
     @Transactional
     public void delete(Long id) {
         User user = userRepository.findById(id)
