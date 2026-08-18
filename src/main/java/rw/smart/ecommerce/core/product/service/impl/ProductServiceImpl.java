@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +19,7 @@ import rw.smart.ecommerce.core.product.dto.ProductFilter;
 import rw.smart.ecommerce.core.product.dao.projection.LowStockProduct;
 import rw.smart.ecommerce.core.product.dto.LowStockResponse;
 import rw.smart.ecommerce.core.product.dto.ProductRequest;
+import rw.smart.ecommerce.core.report.dto.ReportDtos.RelatedProductResponse;
 import rw.smart.ecommerce.core.product.dto.ProductResponse;
 import rw.smart.ecommerce.core.category.dao.CategoryRepository;
 import rw.smart.ecommerce.core.inventory.dao.InventoryRepository;
@@ -64,6 +67,9 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    // A new product changes the catalogue-shaped reports (category summary,
+    // stock distribution). It has no cache entry of its own to evict yet.
+    @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true)
     @Transactional
     public ProductResponse create(ProductRequest request) {
         Category category = categoryRepository.findById(request.categoryId())
@@ -103,7 +109,14 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
-    @CacheEvict(value = CacheConfig.PRODUCTS, key = "#id")
+    // @CachePut rather than @CacheEvict: this method returns exactly what
+    // findById would return next, so replacing the entry beats dropping it and
+    // making the next reader pay for the reload. Safe only because the cache
+    // manager is transaction aware - the put is deferred until commit, so a
+    // constraint violation at flush cannot leave an uncommitted price cached.
+    @Caching(
+            put = @CachePut(value = CacheConfig.PRODUCTS, key = "#id"),
+            evict = @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true))
     @Transactional
     public ProductResponse update(Long id, ProductRequest request) {
         Product product = productRepository.findWithCategoryById(id)
@@ -154,7 +167,9 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
-    @CacheEvict(value = CacheConfig.PRODUCTS, key = "#id")
+    @Caching(evict = {
+            @CacheEvict(value = CacheConfig.PRODUCTS, key = "#id"),
+            @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true)})
     @Transactional
     public void delete(Long id) {
         Product product = productRepository.findById(id)
@@ -192,6 +207,25 @@ public class ProductServiceImpl implements ProductService {
 
         Page<LowStockProduct> rows = productRepository.findLowStock(effective, pagination.forReport(page, size));
         return PageResponse.from(rows, LowStockResponse::from);
+    }
+
+    /**
+     * Cached in {@code SALES_REPORTS} rather than a catalogue cache, which looks
+     * odd on a product endpoint until you look at what the query reads: it groups
+     * over order_items, not over products. A catalogue edit cannot change the
+     * answer, and a new order can — so this belongs with the caches that expire
+     * on a clock rather than the ones an administrator's writes evict.
+     */
+    @Override
+    @Cacheable(value = CacheConfig.SALES_REPORTS, key = "'related:' + #id + ':' + #limit")
+    @Transactional(readOnly = true)
+    public List<RelatedProductResponse> findRelated(Long id, Integer limit) {
+        if (!productRepository.existsById(id))
+            throw ResourceNotFoundException.of("Product", id);
+
+        return orderItemRepository.findBoughtTogetherWith(id, (int) pagination.limit(limit).getPageSize()).stream()
+                .map(RelatedProductResponse::from)
+                .toList();
     }
 
     /**

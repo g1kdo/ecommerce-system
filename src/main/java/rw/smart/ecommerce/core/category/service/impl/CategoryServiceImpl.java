@@ -3,6 +3,7 @@ package rw.smart.ecommerce.core.category.service.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -33,7 +34,12 @@ public class CategoryServiceImpl implements CategoryService {
     }
 
     @Override
-    @CacheEvict(value = CacheConfig.CATEGORIES, allEntries = true)
+    @Caching(evict = {
+            @CacheEvict(value = CacheConfig.CATEGORIES, allEntries = true),
+            // A category rename or removal changes the catalogue summary and the
+            // per-category stock distribution. Sales reports are left alone - they
+            // are keyed on order history, which a category edit does not touch.
+            @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true)})
     @Transactional
     public CategoryResponse create(CategoryRequest request) {
         if (categoryRepository.existsByNameIgnoreCase(request.name()))
@@ -47,7 +53,12 @@ public class CategoryServiceImpl implements CategoryService {
     }
 
     @Override
-    @CacheEvict(value = CacheConfig.CATEGORIES, allEntries = true)
+    @Caching(evict = {
+            @CacheEvict(value = CacheConfig.CATEGORIES, allEntries = true),
+            // A category rename or removal changes the catalogue summary and the
+            // per-category stock distribution. Sales reports are left alone - they
+            // are keyed on order history, which a category edit does not touch.
+            @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true)})
     @Transactional
     public CategoryResponse update(Long id, CategoryRequest request) {
         Category category = categoryRepository.findById(id)
@@ -102,7 +113,12 @@ public class CategoryServiceImpl implements CategoryService {
     }
 
     @Override
-    @CacheEvict(value = CacheConfig.CATEGORIES, allEntries = true)
+    @Caching(evict = {
+            @CacheEvict(value = CacheConfig.CATEGORIES, allEntries = true),
+            // A category rename or removal changes the catalogue summary and the
+            // per-category stock distribution. Sales reports are left alone - they
+            // are keyed on order history, which a category edit does not touch.
+            @CacheEvict(value = CacheConfig.CATALOGUE_REPORTS, allEntries = true)})
     @Transactional
     public void delete(Long id) {
         Category category = categoryRepository.findById(id)

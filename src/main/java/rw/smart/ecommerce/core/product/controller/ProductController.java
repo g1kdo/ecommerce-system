@@ -22,10 +22,12 @@ import rw.smart.ecommerce.core.product.dto.ProductFilter;
 import rw.smart.ecommerce.core.product.dto.ProductRequest;
 import rw.smart.ecommerce.core.product.dto.ProductResponse;
 import rw.smart.ecommerce.core.product.service.ProductService;
+import rw.smart.ecommerce.core.report.dto.ReportDtos.RelatedProductResponse;
 import rw.smart.ecommerce.utils.response.PageResponse;
 import rw.smart.ecommerce.utils.response.StandardResponse;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -82,6 +84,24 @@ public class ProductController {
     @GetMapping("/{id}")
     public ResponseEntity<StandardResponse<ProductResponse>> findById(@PathVariable Long id) {
         return ResponseEntity.ok(StandardResponse.ok("Product retrieved successfully", productService.findById(id)));
+    }
+
+    @Operation(summary = "Products frequently bought with this one",
+            description = """
+                    Built from order history, not from the catalogue: a product appears here
+                    because customers put both in the same order. Cancelled orders are excluded.""")
+    @GetMapping("/{id}/related")
+    public ResponseEntity<StandardResponse<List<RelatedProductResponse>>> related(
+            @PathVariable Long id,
+            @RequestParam(required = false) Integer limit) {
+
+        List<RelatedProductResponse> related = productService.findRelated(id, limit);
+
+        String message = related.isEmpty()
+                ? "This product has not yet been bought alongside anything else"
+                : related.size() + " related product(s) found";
+
+        return ResponseEntity.ok(StandardResponse.ok(message, related));
     }
 
     // ---------------- Administration ----------------
