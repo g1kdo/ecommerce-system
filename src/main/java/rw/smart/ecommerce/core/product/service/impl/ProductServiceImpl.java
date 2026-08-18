@@ -14,6 +14,8 @@ import rw.smart.ecommerce.core.inventory.model.Inventory;
 import rw.smart.ecommerce.core.product.model.Product;
 import rw.smart.ecommerce.utils.response.PageResponse;
 import rw.smart.ecommerce.core.product.dto.ProductFilter;
+import rw.smart.ecommerce.core.product.dao.projection.LowStockProduct;
+import rw.smart.ecommerce.core.product.dto.LowStockResponse;
 import rw.smart.ecommerce.core.product.dto.ProductRequest;
 import rw.smart.ecommerce.core.product.dto.ProductResponse;
 import rw.smart.ecommerce.core.category.dao.CategoryRepository;
@@ -36,6 +38,9 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class ProductServiceImpl implements ProductService {
+
+    /** Anything at or below this many units is treated as needing a reorder. */
+    private static final int DEFAULT_LOW_STOCK_THRESHOLD = 5;
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
@@ -173,6 +178,20 @@ public class ProductServiceImpl implements ProductService {
         } catch (RuntimeException e) {
             log.warn("Product {} was deleted but its review documents could not be removed: {}", id, e.getMessage());
         }
+    }
+
+    /**
+     * The {@code Pageable} is deliberately unsorted: the ranking (lowest stock
+     * first) is in the query, and letting a caller re-sort would not reorder the
+     * page, it would change which products appear on it.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<LowStockResponse> findLowStock(Integer threshold, Integer page, Integer size) {
+        int effective = threshold == null || threshold < 0 ? DEFAULT_LOW_STOCK_THRESHOLD : threshold;
+
+        Page<LowStockProduct> rows = productRepository.findLowStock(effective, pagination.forReport(page, size));
+        return PageResponse.from(rows, LowStockResponse::from);
     }
 
     /**

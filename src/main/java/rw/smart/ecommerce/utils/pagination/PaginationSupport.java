@@ -23,6 +23,7 @@ public class PaginationSupport {
     private static final Set<String> SORTABLE_PRODUCT_FIELDS = Set.of("id", "name", "price", "createdAt", "sku");
     private static final Set<String> SORTABLE_USER_FIELDS = Set.of("id", "username", "email", "fullName", "createdAt");
     private static final Set<String> SORTABLE_ORDER_FIELDS = Set.of("id", "orderDate", "totalAmount", "status");
+    private static final Set<String> SORTABLE_CATEGORY_FIELDS = Set.of("id", "name");
 
     private final int defaultPageSize;
     private final int maxPageSize;
@@ -44,6 +45,38 @@ public class PaginationSupport {
 
     public Pageable forOrders(Integer page, Integer size, String sortBy, String direction) {
         return build(page, size, sortBy, direction, SORTABLE_ORDER_FIELDS, "orderDate");
+    }
+
+    public Pageable forCategories(Integer page, Integer size, String sortBy, String direction) {
+        return build(page, size, sortBy, direction, SORTABLE_CATEGORY_FIELDS, "name");
+    }
+
+    /**
+     * Paging without sorting, for queries that carry their own ORDER BY.
+     *
+     * A report is a ranking — "lowest stock first", "best sellers" — and the
+     * ordering is what makes the numbers mean anything. Letting a caller re-sort
+     * it would not reorder the page, it would change which rows are on the page.
+     * Spring Data also appends a {@code Sort} as raw property names, which cannot
+     * resolve against a projection's aliases.
+     */
+    public Pageable forReport(Integer page, Integer size) {
+        int pageNumber = page == null || page < 0 ? 0 : page;
+        int pageSize = size == null || size < 1 ? defaultPageSize : size;
+        if (pageSize > maxPageSize) pageSize = maxPageSize;
+
+        return PageRequest.of(pageNumber, pageSize, Sort.unsorted());
+    }
+
+    /**
+     * A pure row limit for the ranked reports that return a list rather than a
+     * page — top customers, best sellers. Page zero of {@code limit} rows.
+     */
+    public Pageable limit(Integer limit) {
+        int rows = limit == null || limit < 1 ? 10 : limit;
+        if (rows > maxPageSize) rows = maxPageSize;
+
+        return PageRequest.of(0, rows, Sort.unsorted());
     }
 
     private Pageable build(Integer page, Integer size, String sortBy, String direction,

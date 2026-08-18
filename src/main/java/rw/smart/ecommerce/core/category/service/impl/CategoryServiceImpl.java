@@ -3,6 +3,8 @@ package rw.smart.ecommerce.core.category.service.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import rw.smart.ecommerce.config.CacheConfig;
@@ -13,6 +15,8 @@ import rw.smart.ecommerce.core.category.dao.CategoryRepository;
 import rw.smart.ecommerce.core.category.service.CategoryService;
 import rw.smart.ecommerce.utils.exceptions.DuplicateResourceException;
 import rw.smart.ecommerce.utils.exceptions.ResourceNotFoundException;
+import rw.smart.ecommerce.utils.pagination.PaginationSupport;
+import rw.smart.ecommerce.utils.response.PageResponse;
 
 import java.util.List;
 
@@ -21,9 +25,11 @@ import java.util.List;
 public class CategoryServiceImpl implements CategoryService {
 
     private final CategoryRepository categoryRepository;
+    private final PaginationSupport pagination;
 
-    public CategoryServiceImpl(CategoryRepository categoryRepository) {
+    public CategoryServiceImpl(CategoryRepository categoryRepository, PaginationSupport pagination) {
         this.categoryRepository = categoryRepository;
+        this.pagination = pagination;
     }
 
     @Override
@@ -71,6 +77,28 @@ public class CategoryServiceImpl implements CategoryService {
     @Transactional(readOnly = true)
     public List<CategoryResponse> findAll() {
         return categoryRepository.findAllByOrderByNameAsc().stream().map(CategoryResponse::from).toList();
+    }
+
+    /**
+     * Deliberately not cached, unlike {@link #findAll()}.
+     *
+     * The key would have to include the keyword, the page, the size and the sort
+     * direction, so every distinct administrator search would take its own entry.
+     * A cache that fills with single-use entries evicts the ones that were
+     * earning their place — here, the storefront's category list.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<CategoryResponse> search(String keyword, Integer page, Integer size,
+                                                 String sortBy, String direction) {
+
+        Pageable pageable = pagination.forCategories(page, size, sortBy, direction);
+
+        Page<Category> results = keyword == null || keyword.isBlank()
+                ? categoryRepository.findAll(pageable)
+                : categoryRepository.findByNameContainingIgnoreCase(keyword.trim(), pageable);
+
+        return PageResponse.from(results, CategoryResponse::from);
     }
 
     @Override

@@ -16,6 +16,17 @@ public interface OrderService {
 
     List<OrderResponse> findByUser(Long userId);
 
+    /**
+     * Paginated order history, optionally narrowed to one status.
+     *
+     * {@link #findByUser(Long)} returns the whole history in one list and is kept
+     * for the existing endpoint, but it is unbounded by construction — a customer
+     * with a thousand orders gets a thousand orders, each with its lines and each
+     * line's product. New callers should use this.
+     */
+    PageResponse<OrderResponse> findByUser(Long userId, OrderStatus status, Integer page, Integer size,
+                                           String sortBy, String direction);
+
     PageResponse<OrderResponse> findAll(OrderStatus status, Integer page, Integer size,
                                         String sortBy, String direction);
 

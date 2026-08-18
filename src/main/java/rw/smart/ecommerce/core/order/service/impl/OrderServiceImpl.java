@@ -128,6 +128,30 @@ public class OrderServiceImpl implements OrderService {
                 .toList();
     }
 
+    /**
+     * The paginated history. The page of orders is fetched without a fetch join —
+     * a join fetch under LIMIT/OFFSET pages the wrong rows — and the lines and
+     * their products are then resolved for the whole page by Hibernate's batch
+     * fetching, configured as {@code default_batch_fetch_size} in
+     * {@code application.properties}.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<OrderResponse> findByUser(Long userId, OrderStatus status, Integer page, Integer size,
+                                                  String sortBy, String direction) {
+
+        if (!userRepository.existsById(userId))
+            throw ResourceNotFoundException.of("User", userId);
+
+        Pageable pageable = pagination.forOrders(page, size, sortBy, direction);
+
+        Page<Order> orders = status == null
+                ? orderRepository.findByUserId(userId, pageable)
+                : orderRepository.findByUserIdAndStatus(userId, status, pageable);
+
+        return PageResponse.from(orders, OrderResponse::from);
+    }
+
     @Override
     @Transactional(readOnly = true)
     public PageResponse<OrderResponse> findAll(OrderStatus status, Integer page, Integer size,

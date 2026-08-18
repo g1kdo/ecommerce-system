@@ -13,10 +13,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import rw.smart.ecommerce.core.category.dto.CategoryRequest;
 import rw.smart.ecommerce.core.category.dto.CategoryResponse;
 import rw.smart.ecommerce.core.category.service.CategoryService;
+import rw.smart.ecommerce.utils.response.PageResponse;
 import rw.smart.ecommerce.utils.response.StandardResponse;
 
 import java.util.List;
@@ -44,6 +46,24 @@ public class CategoryController {
     @GetMapping("/{id}")
     public ResponseEntity<StandardResponse<CategoryResponse>> findById(@PathVariable Long id) {
         return ResponseEntity.ok(StandardResponse.ok("Category retrieved successfully", categoryService.findById(id)));
+    }
+
+    @Operation(summary = "Search categories with pagination (Admin only)",
+            description = """
+                    `keyword` matches the category name. Sortable by id or name. This is the
+                    management view; the public listing above returns every category from a
+                    single cached call and is the one a storefront should use.""")
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/search")
+    public ResponseEntity<StandardResponse<PageResponse<CategoryResponse>>> search(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String direction) {
+
+        PageResponse<CategoryResponse> results = categoryService.search(keyword, page, size, sortBy, direction);
+        return ResponseEntity.ok(StandardResponse.ok("Categories retrieved successfully", results));
     }
 
     @Operation(summary = "Create a category (Admin only)")
