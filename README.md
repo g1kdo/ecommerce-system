@@ -380,6 +380,63 @@ PostgreSQL database:
 createdb -U postgres smart_ecommerce_test_db
 ```
 
+### Phase 3 profiling settings
+
+The four files are **git-ignored** — they carry database credentials — so the settings
+added in Phase 3 are recorded here as the reviewable copy. Apply them to your local
+files.
+
+`application.properties` (shared, all profiles):
+
+```properties
+spring.jpa.properties.hibernate.generate_statistics=false
+spring.jpa.properties.hibernate.session.events.log.LOG_QUERIES_SLOWER_THAN_MS=0
+spring.jpa.properties.hibernate.default_batch_fetch_size=25
+spring.jpa.properties.hibernate.query.fail_on_pagination_over_collection_fetch=true
+spring.jpa.properties.hibernate.query.plan_cache_max_size=512
+```
+
+`default_batch_fetch_size` is the one that matters. The paginated order list reads a
+page of orders and then needs each order's lines; without batching that is one statement
+per order. Fetch-joining the collection instead is not an option — a join fetch combined
+with `LIMIT` returns the wrong page, and Hibernate's fallback is to read every matching
+row and page in heap. `fail_on_pagination_over_collection_fetch` turns that fallback
+into an exception at development time instead of a table scan in production.
+
+`application-dev.properties` — everything on, because this is where an accidental N+1 is
+meant to be noticed:
+
+```properties
+spring.jpa.properties.hibernate.generate_statistics=true
+spring.jpa.properties.hibernate.session.events.log.LOG_QUERIES_SLOWER_THAN_MS=50
+logging.level.org.hibernate.stat=DEBUG
+logging.level.org.hibernate.SQL_SLOW=INFO
+logging.level.org.springframework.cache=TRACE
+logging.level.org.springframework.transaction.interceptor=TRACE
+```
+
+`logging.level.org.springframework.cache=TRACE` prints every hit, miss and eviction,
+which is the only practical way to confirm an eviction rule fires on the write path it
+was written for.
+
+`application-test.properties` — statistics are asserted on by the query-count tests, so
+they are collected here regardless of what dev is set to:
+
+```properties
+spring.jpa.properties.hibernate.generate_statistics=true
+logging.level.org.springframework.transaction.interceptor=DEBUG
+```
+
+`application-prod.properties` — statistics off, slow-query log on. The slow-query log
+costs nothing until a statement is actually slow, and it is the first thing anyone asks
+for when the service is reported slow:
+
+```properties
+spring.jpa.properties.hibernate.generate_statistics=false
+spring.jpa.properties.hibernate.session.events.log.LOG_QUERIES_SLOWER_THAN_MS=500
+logging.level.org.hibernate.SQL_SLOW=WARN
+```
+
 ---
 
 ## Build and test
