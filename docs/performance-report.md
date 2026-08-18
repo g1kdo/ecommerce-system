@@ -15,6 +15,11 @@ it described (`ProductCache`, the daemon-thread `LogService`,
 GraphQL comparison, which also turned up the largest per-request cost in the current
 system and one security defect.
 
+**Section 11 is new in Phase 3** and measures the persistence layer itself: how many
+JDBC statements a request costs, what aggregating in the database saves over aggregating
+in Java, and what the caches are worth. It also reports one negative result, and one
+measurement that had to be thrown away for being invalid.
+
 If you read one thing, read [§6.5](#65-the-finding-that-dominates-both-authentication-cost):
 authentication now costs ~95 ms on every authenticated request, which is larger than any
 transport difference measured here.
@@ -554,10 +559,10 @@ any individual index, because it applies to every query the application makes.
 | # | Change | Evidence | Expected effect |
 |---|---|---|---|
 | 1 | Stop re-verifying the password on every request | §6.5: +95 ms on **every** authenticated call | Largest single win available. BCrypt belongs at login, not per request. Options, in increasing order of work: allow a session so the check happens once per session instead of once per call; or issue a short-lived token after one BCrypt verification. Lowering the BCrypt cost factor would also "work" and is the wrong fix — it buys latency by weakening every stored password |
-| 2 | Add `pg_trgm` GIN index for the substring search the catalogue runs | Q4: 109.4 → 11.2 ms | 9.7× on the main search box |
+| 2 | Add `pg_trgm` GIN index for the substring search the catalogue runs | Q4: 109.4 -> 11.2 ms | 9.7x on the main search box. **Applied in Phase 3** — `migration-phase3.sql` |
 | 3 | Enforce query depth and complexity limits on GraphQL | §6.4 | A single deep query can cost far more than any REST endpoint; REST payload shapes are fixed, GraphQL's are not |
 | 4 | Add `text_pattern_ops` index if prefix search is offered | Q2 vs Q3: 99.2 → 0.125 ms | 853× on prefix search |
-| 5 | Make the category listing index composite `(category_id, name)` | Q7: only 4.1×, sort still dominates | Removes the sort step |
+| 5 | Make the category listing index composite `(category_id, name)` | Q7: only 4.1x, sort still dominates | Removes the sort step. **Applied in Phase 3** as `(category_id, LOWER(name))`, which is what the query actually filters on |
 | 6 | Drop the redundant `idx_reviews_product` | §4.2: constraint index already serves it | Frees 6.2 MB, faster review writes |
 
 Index maintenance is not free — total index footprint on this dataset is ~62 MB against
@@ -572,7 +577,7 @@ Found while benchmarking, and worth carrying forward as work rather than a footn
 |---|---|---|
 | 1 | GraphQL order queries were readable without credentials | **Fixed** — §6.6 |
 | 2 | Any authenticated user can read any other user's orders, over both APIs. `GET /orders?userId=…` and `ordersByUser(userId:)` check that the caller is signed in, not that the orders are theirs | **Open.** Needs an ownership check comparing the authenticated principal to the order's owner, with ADMIN exempt |
-| 3 | Test coverage is one context-load test | **Open.** The Phase 1 suites tested classes that no longer exist and were removed with them |
+| 3 | Test coverage is one context-load test | **Closed in Phase 3.** 26 tests covering transaction boundaries, every native query, and cache behaviour — see [§11.10](#1110-phase-3-test-coverage) |
 
 ---
 
@@ -644,3 +649,280 @@ Application layer (end-to-end through the service layer, includes JDBC):
 | 20 log events, async writer | 11.305 ms |
 | JDBC connect + close | 96.102 ms |
 | Indexed query on an open connection | 0.260 ms |
+
+---
+
+## 11. Phase 3 — persistence and caching
+
+Sections 1–10 measured the database (indexes) and the transport (REST vs GraphQL).
+This section measures the layer between them: how the application asks for data, how
+many statements that costs, and what a cache saves.
+
+Everything here is **measured**, by a harness committed alongside it —
+[`Phase3BenchmarkTest`](../src/test/java/rw/smart/ecommerce/performance/Phase3BenchmarkTest.java)
+and the two `OrderPage*BenchmarkTest` classes. Run them yourself:
+
+```bash
+./mvnw -o test -Dtest=Phase3BenchmarkTest,OrderPage*BenchmarkTest -Dbenchmark=true
+```
+
+They seed ~4 500 rows into `smart_ecommerce_test_db`, measure, print a markdown table,
+and delete what they created.
+
+### 11.1 Read this before the table
+
+**Statement counts are the trustworthy numbers here; wall times are not.**
+
+That is not a hedge, it is a finding. Across three runs the paginated order list took
+27.8 ms, 30.0 ms and 39.2 ms with batch fetching on, and 61.3 ms, 47.9 ms and 35.0 ms
+with it off — overlapping ranges, and in the third run the "optimized" side was
+*slower*. The statement count over the same three runs was **52 and 5, every time.**
+
+The reason is that this dataset is small and the database is on localhost. Fifty-two
+statements against a warm 40-row table cost a few milliseconds; on a real network at a
+realistic round-trip time they cost fifty times a round trip. The N+1 is real and the
+statement count proves it; the laptop simply cannot make it hurt.
+
+So: counts are reported as measured. Wall times are reported with the spread across
+three runs, and where the spread swallows the difference, that is said outright.
+
+Environment is the machine from [§2](#2-methodology) — 12th Gen Core i7-1255U,
+PostgreSQL 18.1, JDK 21, everything on localhost. Dataset: 200 products in 4 categories,
+400 orders, 1 200 order lines. Median of 5 timed runs after one warm-up.
+
+### 11.2 Headline results
+
+| # | Measurement | Before | After | Change |
+|---|---|---:|---:|---|
+| A | Paginated order list, 20 orders — **JDBC statements** | 52 | **5** | **10.4× fewer** |
+| B | "Has this user any orders?" — orders pulled into heap | 400 | **0** | answered by an index |
+| C | "Has this user any orders?" — wall time | 40.675 ms | **2.333 ms** | 17.4× (range 16–31×) |
+| D | Order-status breakdown — rows read | 400 | **5** | one row per status |
+| E | Order-status breakdown — wall time | 13.546 ms | **4.550 ms** | 3.0× (range 3.0–6.0×) |
+| F | Product detail by id — one service call | 10.503 ms | **0.140 ms** | 75× (range 75–133×) |
+| G | Daily sales report, 60-day window | 11.654 ms | **0.170 ms** | 69× (range 30–156×) |
+| H | Reorder report, 20 rows — JDBC statements | 3 | **2** | 1.5× fewer |
+| I | Reorder report, 20 rows — wall time | 9.228 ms | 7.260 ms | 1.3× — see §11.8 |
+
+### 11.3 A — the N+1 nobody could see
+
+The admin order list and the customer's order history both page over orders and then map
+each one to a response. `OrderResponse.from` walks `order.getItems()`, and
+`OrderItemResponse.from` reads `item.getProduct().getName()`. Both associations are lazy.
+For a page of 20 orders with 3 lines each that is:
+
+```
+ 1  select the page of orders
+ 1  select count(*) for the page metadata
+20  select the items for each order, one order at a time
+30  initialise each distinct product proxy
+```
+
+**52 statements measured.** The fix is not an `@EntityGraph`. A fetch join against a
+collection combined with `LIMIT/OFFSET` returns the wrong page — Hibernate's own answer
+is to read every matching row and paginate in heap, which is correct and catastrophic.
+The repository says so in a comment, and
+`hibernate.query.fail_on_pagination_over_collection_fetch=true` now makes the attempt an
+exception rather than a silent table scan.
+
+The fix is `hibernate.default_batch_fetch_size=25`: the collections and the proxies are
+resolved for the whole page at once.
+
+```
+ 1  select the page of orders
+ 1  select count(*)
+ 1  select items where order_id in (...)
+ 2  select products where product_id in (...)
+```
+
+**5 statements.** One property, no code change, and it applies to every lazy association
+in the application rather than to the one query somebody remembered to annotate.
+
+This measurement needs two application contexts, because the batch size is fixed when
+the `SessionFactory` is built — hence the two `OrderPage*BenchmarkTest` classes. The
+in-session alternative, `Session.setFetchBatchSize`, was tried first: it produced an
+identical statement count on both sides, because Hibernate reads it as a hint that does
+not reach these loads, and `-1` means "use the factory default" rather than "off". That
+attempt is recorded in the test's javadoc rather than deleted, because a benchmark that
+compares a setting against itself looks exactly like a benchmark that works.
+
+### 11.4 B and C — asking the right question
+
+`UserServiceImpl.delete` needed to know whether a user had any orders. It asked like
+this:
+
+```java
+if (!orderRepository.findByUserIdOrderByOrderDateDesc(id).isEmpty())
+```
+
+That method carries `@EntityGraph({"items", "items.product", "user"})`. To answer a yes/no
+question it loaded **400 orders, 1 200 order lines and every product they referenced**
+into the persistence context, then called `isEmpty()` on the result.
+
+```java
+if (orderRepository.existsByUserId(id))
+```
+
+**40.675 ms → 2.333 ms.** The ratio varies between 16× and 31× across runs because the
+"before" side is doing real work whose cost depends on what else the machine is doing.
+The invariant does not vary: the after side reads no order rows at all.
+
+This is the cheapest kind of optimization there is — a method name — and it was invisible
+because the old line was perfectly readable and did the right thing.
+
+### 11.5 D and E — aggregate where the data is
+
+The administrator's dashboard wants order counts and revenue per status. The obvious
+implementation loads the orders and groups them in a stream. The JPQL one does not:
+
+```java
+SELECT o.status AS status, COUNT(o.id) AS orderCount, COALESCE(SUM(o.totalAmount), 0) AS revenue
+FROM Order o WHERE o.orderDate >= :from AND o.orderDate < :to GROUP BY o.status
+```
+
+**400 rows read becomes 5** — one per status — and 13.546 ms becomes 4.550 ms.
+
+The 3× is the least interesting part of it. What matters is the shape: the Java version
+costs more as the order table grows, and the SQL version costs the same five rows
+forever. On the 200 000-row dataset from [§2](#2-methodology) the Java version would not
+be 3× slower, it would be unusable.
+
+The results come back as **closed interface projections**, so Hibernate selects the three
+columns the report renders rather than hydrating entities and discarding most of them.
+
+### 11.6 F — the product cache, honestly
+
+**10.503 ms → 0.140 ms**, and the ratio ranges from 75× to 133×.
+
+Two honest qualifications, in the spirit of [§7](#7-the-dominant-cost-is-not-a-missing-index),
+where the headline 65 000× turned out to be mostly connection setup:
+
+- The "before" figure is an **end-to-end service call**, not a query. It includes opening
+  a transaction, the `@Around` monitoring aspect, and handing an access-log document to
+  the async writer. The SQL itself is a fraction of it.
+- The "after" figure is a hash lookup. Of course it wins.
+
+What the number is actually good for is the ratio of *how often the work happens*, and
+the useful version of that was already measured in [§5.2](#52-caching--cacheconfig-replacing-productcache):
+five reads, one service invocation.
+
+Phase 3 changes how the entry is maintained rather than how fast it is read.
+`ProductServiceImpl.update` now uses `@CachePut` instead of `@CacheEvict`: the method
+already returns exactly what the next `findById` would return, so replacing the entry is
+strictly better than dropping it and charging the next reader for a reload. Same for
+`UserServiceImpl.update` against the new `profiles` cache.
+
+That is only safe because the cache manager is now wrapped in a
+`TransactionAwareCacheManagerProxy`. Without it, cache writes happen at method return —
+*before* commit — so a constraint violation raised at flush would leave the cache serving
+a value the database rejected. A stale eviction only costs a miss; a stale put serves
+data that never existed. Deferring both until commit closes that.
+
+### 11.7 G — the report cache, and why it expires instead of evicting
+
+**11.654 ms → 0.170 ms** for a 60-day daily-sales report. The range, 30× to 156×, is wide
+because the cold side is a `date_trunc` group over the order table and its cost tracks
+whatever else PostgreSQL is doing.
+
+The design decision worth recording is not the speed-up, it is the invalidation rule.
+
+Every checkout changes the numbers in a sales report. An eviction rule would therefore
+evict on every order, and on a busy day the cache would never be warm — it would be pure
+overhead. So `salesReports` has **no eviction rule at all**. It expires after five
+minutes, and the report is documented as a snapshot with a five-minute staleness bound,
+which is a thing a revenue figure is allowed to be.
+
+Catalogue-shaped reports cannot take that trade: an administrator who has just added a
+product expects the category summary to show it. They live in a separate cache,
+`catalogueReports`, which the product, category and inventory services do evict.
+
+Two caches instead of one, because they are correct for two different reasons. Verified
+by [`ProductCacheBehaviourTest`](../src/test/java/rw/smart/ecommerce/core/product/ProductCacheBehaviourTest.java),
+which reads entries out of the `CacheManager` directly rather than timing anything — a
+timing-based cache test passes on a fast machine, fails on a loaded one, and never says
+which annotation was wrong.
+
+### 11.8 H and I — where a projection barely helps
+
+The reorder report was measured both ways: as an interface projection, and as
+`Inventory` entities with their product and category navigated for rendering.
+
+**3 statements to 2, and 9.228 ms to 7.260 ms.** A 1.3× that is inside the run-to-run
+spread.
+
+This is reported because it is the negative result of the set, and it has a cause worth
+knowing: **batch fetching already absorbed most of the N+1 the projection was supposed to
+avoid.** With `default_batch_fetch_size=25` in force, the entity version resolves its
+products and categories in batches too, so the projection's remaining advantage is the
+columns it does not select and the entities it does not put in the persistence context —
+real, but not visible at 20 rows on localhost.
+
+The projection stays, on the grounds that selecting five columns beats selecting three
+tables' worth to render five, and that the advantage grows with page size while the cost
+of having written it does not. But it did not earn its place on this measurement, and
+saying so is more useful than quoting 1.3× as though it were a win.
+
+### 11.9 Transaction correctness, which is not a speed measurement
+
+Not a benchmark, but the Phase 3 result with the most at stake. Six integration tests in
+[`OrderTransactionRollbackTest`](../src/test/java/rw/smart/ecommerce/core/order/OrderTransactionRollbackTest.java)
+assert what the checkout transaction actually does:
+
+| Scenario | Asserted |
+|---|---|
+| Every line has stock | Order committed, stock decremented |
+| A later line is short | **Earlier reservations rolled back**, no order row survives |
+| A line is short | The shortfall is still recorded — see below |
+| Same product listed twice | Merged into one line, reserved once |
+| Order cancelled | Stock returned to the shelf |
+| Basket names a missing product | Nothing committed, no stock moved |
+
+The third row is the `REQUIRES_NEW` case. A stock shortfall is written one statement
+before the checkout transaction rolls back. Under the default `REQUIRED` propagation the
+insert would join that transaction and be rolled back with it — the record of the failure
+destroyed by the failure it records. On its own transaction, it commits and survives.
+
+The test class is deliberately **not** `@Transactional`. That is the standard way to write
+a JPA test and it would make every assertion here meaningless: the service would join the
+test's transaction, its rollback would become a rollback of the test, and the suite would
+pass whether or not `placeOrder` were transactional at all.
+
+### 11.10 Phase 3 test coverage
+
+`§8.3` recorded "test coverage is one context-load test" as an open item. It is now 26:
+
+| Suite | Tests | What it proves |
+|---|---:|---|
+| `OrderTransactionRollbackTest` | 6 | Transaction boundaries and rollback, against a real database |
+| `ReportQueryIntegrationTest` | 14 | Every JPQL and **native** query executes and binds |
+| `ProductCacheBehaviourTest` | 5 | `@Cacheable`, `@CachePut` and `@CacheEvict` do what they claim |
+| `EcommerceApplicationTests` | 1 | Context loads |
+
+`ReportQueryIntegrationTest` exists because of an asymmetry that is easy to be caught by.
+JPQL is parsed when the context starts, so a typo fails the application at boot and is
+impossible to miss. **Native SQL is not.** A malformed native query sits in the repository
+looking healthy until something runs it — which, for a report an administrator opens once
+a month, could be long after it shipped. Those 14 tests are how the `FILTER`,
+`date_trunc`, `to_char`, window-function and self-join clauses are checked at all.
+
+### 11.11 What Phase 3 did not measure
+
+Stated so the gaps are not mistaken for results:
+
+1. **The new indexes are unmeasured.** `migration-phase3.sql` adds eight, including the
+   `pg_trgm` GIN index that [§8.2 #2](#82-outstanding-highest-value-first) measured at
+   9.7× on the catalogue search box. Those Phase 1 figures stand; the Phase 3 indexes for
+   the reporting queries have not been through the same before/after protocol.
+2. **No concurrency test.** The conditional decrement is argued to be race-free because
+   check and take are one statement, and the pessimistic lock in
+   `findByProductIdForUpdate` backs it up. Neither claim is tested under actual
+   concurrent load.
+3. **The 95 ms per-request BCrypt cost from [§6.5](#65-the-finding-that-dominates-both-authentication-cost)
+   is still there.** It remains the largest single cost in the system and it is larger
+   than every wall-time difference in this section combined. Phase 3 did not touch it.
+
+That last one deserves the final word. A 10× reduction in statement count is worth having,
+and it still saves less per request than not re-verifying the password on every call.
+**The dominant cost is rarely the query** — which is what §7 concluded about connection
+setup in Phase 1, and what §6.5 concluded about authentication in Phase 2. Three phases,
+three different dominant costs, and none of them an index.
