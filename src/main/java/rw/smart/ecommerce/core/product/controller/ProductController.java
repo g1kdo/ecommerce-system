@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import rw.smart.ecommerce.core.inventory.dto.StockRequest;
 import rw.smart.ecommerce.core.inventory.service.InventoryService;
+import rw.smart.ecommerce.core.product.dto.LowStockResponse;
 import rw.smart.ecommerce.core.product.dto.ProductFilter;
 import rw.smart.ecommerce.core.product.dto.ProductRequest;
 import rw.smart.ecommerce.core.product.dto.ProductResponse;
@@ -84,6 +85,27 @@ public class ProductController {
     }
 
     // ---------------- Administration ----------------
+
+    @Operation(summary = "Products at or below a stock threshold (Admin only)",
+            description = """
+                    The reorder report, lowest stock first. `threshold` defaults to 5.
+                    Results are not sortable: the ordering is what makes the page mean
+                    something, and re-sorting it would change which rows appear.""")
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/low-stock")
+    public ResponseEntity<StandardResponse<PageResponse<LowStockResponse>>> lowStock(
+            @RequestParam(required = false) Integer threshold,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+
+        PageResponse<LowStockResponse> results = productService.findLowStock(threshold, page, size);
+
+        String message = results.totalElements() == 0
+                ? "No products are below the threshold"
+                : results.totalElements() + " product(s) need restocking";
+
+        return ResponseEntity.ok(StandardResponse.ok(message, results));
+    }
 
     @Operation(summary = "Create a product (Admin only)",
             description = "Also creates the matching inventory row, using `initialStock` or zero.")

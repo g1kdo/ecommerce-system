@@ -60,6 +60,26 @@ public class OrderController {
         return ResponseEntity.ok(StandardResponse.ok(orders.size() + " order(s) retrieved", orders));
     }
 
+    @Operation(summary = "Get a paginated order history for a user",
+            description = """
+                    The paginated form of the endpoint above, optionally narrowed to one
+                    status. Prefer it: the unpaginated version returns a customer's entire
+                    history in one response, which has no upper bound.""")
+    @GetMapping("/history")
+    public ResponseEntity<StandardResponse<PageResponse<OrderResponse>>> history(
+            @RequestParam Long userId,
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String direction) {
+
+        PageResponse<OrderResponse> orders =
+                orderService.findByUser(userId, status, page, size, sortBy, direction);
+
+        return ResponseEntity.ok(StandardResponse.ok("Order history retrieved successfully", orders));
+    }
+
     @Operation(summary = "Get all orders with pagination (Admin only)",
             description = "Optionally filtered by status. Sortable by id, orderDate, totalAmount or status.")
     @PreAuthorize("hasRole('ADMIN')")

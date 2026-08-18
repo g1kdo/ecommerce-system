@@ -122,8 +122,11 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> ResourceNotFoundException.of("User", id));
 
         // Orders reference users with ON DELETE RESTRICT; reporting the conflict
-        // here gives a readable 409 instead of a constraint violation from the driver.
-        if (!orderRepository.findByUserIdOrderByOrderDateDesc(id).isEmpty())
+        // here gives a readable 409 instead of a constraint violation from the
+        // driver. An EXISTS, not a load: the previous check read the user's whole
+        // order history — every line, every product — to ask whether there was
+        // one.
+        if (orderRepository.existsByUserId(id))
             throw new DuplicateResourceException(
                     "Cannot delete user " + id + " because they have existing orders.");
 
