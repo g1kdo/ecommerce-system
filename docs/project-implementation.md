@@ -999,7 +999,86 @@ If you want to inspect the implementation directly, start here:
 - `src/main/java/rw/smart/ecommerce/utils/pagination/PaginationSupport.java`
 - `src/main/java/rw/smart/ecommerce/utils/exceptions/handler/GlobalExceptionHandler.java`
 
-## 28. Final Note
+## 28. What Phase 3 Added
+
+Phase 3 did not add features so much as change how the existing ones talk to the
+database. Six things changed.
+
+**Repositories learned to answer questions instead of returning rows.**
+
+Before, a repository mostly handed back entities and the service did the rest in Java.
+Now there are three kinds of query alongside the derived ones:
+
+- **JPQL** for anything that groups or sums — revenue by status, top customers, the
+  category summary. The database does the counting and sends back five rows instead of
+  four hundred.
+- **Native SQL** for the handful of things JPQL genuinely cannot say. Each one has a
+  comment explaining why it had to be native: an aggregate `FILTER` clause, a
+  `date_trunc` grouping, a window function, a self-join with no association to follow.
+  "Native because it is faster" is not one of the reasons, and would not have been a
+  good one.
+- **Interface projections** so those aggregates return only the columns the report
+  shows. No entity is loaded to be thrown away.
+
+**The paginated order list stopped making one query per order.**
+
+Reading a page of twenty orders used to cost fifty-two database round trips, because
+every order fetched its own lines and every line fetched its own product. The fix is one
+setting, `hibernate.default_batch_fetch_size=25`, which makes Hibernate resolve the whole
+page at once. Five round trips.
+
+The obvious alternative — a fetch join — is wrong here, and the repository says so. A
+fetch join combined with `LIMIT` returns the wrong page, and Hibernate's fallback is to
+read the whole table and paginate in memory. A second setting now turns that fallback
+into an error at development time instead of a slow surprise in production.
+
+**The checkout says what it needs from a transaction.**
+
+`placeOrder` was already transactional. It now states its propagation, isolation, timeout
+and rollback rule explicitly, with the reasoning written next to them — including why a
+stronger isolation level would make things worse rather than better here, and why a
+timeout matters when a stalled checkout is holding locks other buyers are queued behind.
+
+**A failed checkout now leaves a trace.**
+
+When there is not enough stock, the order rolls back — correctly, and that is the point.
+But it used to roll back silently, and a sale you failed to make leaves no row anywhere.
+
+There is now a small `checkout_shortfalls` table, written on its own separate transaction
+so that the rollback cannot take it with it. That is what `REQUIRES_NEW` is for, and it
+is the only place in this codebase that needs it. A report reads the table and shows
+which products people tried to buy and could not.
+
+**Two caches instead of one kind of cache.**
+
+The existing caches are kept correct by eviction: when stock moves, the cached product is
+thrown away. That works because stock moves rarely.
+
+Sales reports cannot work that way. Every single order changes a revenue number, so an
+eviction rule would empty the cache continuously and it would never be warm. So the sales
+cache has no eviction rule at all — it simply expires after five minutes, and the report
+is honest about being a five-minute-old snapshot. Reports about the catalogue rather than
+about sales are in a different cache, and those *are* evicted, because an administrator
+who has just added a product expects to see it.
+
+Updates also changed shape. `@CacheEvict` threw the entry away; `@CachePut` replaces it
+with the new value, which the update method already has in its hands. That is only safe
+because cache writes now wait for the transaction to commit — otherwise a write that
+failed at the last moment would leave the cache serving something the database rejected.
+
+**Tests that check the parts that fail quietly.**
+
+The suite went from one test to twenty-six. Two of them are worth understanding:
+
+- The rollback tests deliberately do *not* use `@Transactional`. That is the normal way
+  to write a database test, and here it would quietly make every assertion meaningless.
+- There is a suite that does nothing but run every native query once. JPQL errors show up
+  when the application starts, so they are impossible to miss; a broken native query
+  waits silently until somebody opens the report.
+
+---
+
+## 29. Final Note
 
 The main design goal of this project is not to be fancy. The goal is to be clear, safe, and fast enough for the work it does.
 
