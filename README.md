@@ -64,9 +64,9 @@ not send a `WWW-Authenticate` challenge, precisely so that popup never appears.
 | GraphQL endpoint | http://localhost:8080/graphql |
 | Health | http://localhost:8080/actuator/health |
 
-### Upgrading an existing Phase 1 database
+### Upgrading an existing database
 
-Two migrations, run once each, **before** starting the app:
+Run once each, **before** starting the app:
 
 ```bash
 psql -U postgres -d smart_ecommerce_db -f docs/sql/migration-phase2.sql
@@ -76,9 +76,20 @@ psql -U postgres -d smart_ecommerce_db -f docs/sql/migration-phase2.sql
 psql -U postgres -d smart_ecommerce_db -f docs/sql/migration-password-encoding.sql
 ```
 
+```bash
+psql -U postgres -d smart_ecommerce_db -f docs/sql/migration-phase3.sql
+```
+
 The first adds `users.role` and moves `OrderItems` to `order_items`; `ddl-auto` can do
 neither. The second tags existing SHA-256 hashes `{sha256}` so those accounts keep
 working — each one silently re-hashes to BCrypt on its owner's next successful login.
+
+The third adds the `checkout_shortfalls` audit table and the indexes the Phase 3
+reporting queries need. `ddl-auto=update` will create the table for you in dev but will
+not create a single index, and `prod` runs `validate` — so this file is the authority for
+both. It also applies two recommendations the Phase 1 index study left open with
+measurements attached: the composite `(category_id, LOWER(name))` and the `pg_trgm` GIN
+index for the catalogue's substring search.
 
 ---
 
@@ -100,10 +111,12 @@ src/main/java/rw/smart/ecommerce/
 │   ├── LegacySha256PasswordEncoder
 │   ├── RestAuthenticationEntryPoint   -- 401 as JSON, no browser popup
 │   └── RestAccessDeniedHandler        -- 403 as JSON
-├── core/<feature>/            -- user, category, product, inventory, order, review, log
+├── core/<feature>/            -- user, category, product, inventory, order,
+│                                 review, log, audit, report
 │   ├── model/                 -- JPA entities (or Mongo documents for review/log)
 │   ├── enums/                 -- plain constant lists
 │   ├── dao/                   -- Spring Data repositories (+ Mongo repositories)
+│   │   └── projection/        -- closed interface projections for the aggregates
 │   ├── dto/                   -- validated requests, response projections
 │   ├── service/ + service/impl
 │   └── controller/            -- one REST controller + one GraphQL controller
@@ -165,6 +178,38 @@ GET /api/v1/products?keyword=mouse&categoryId=3&minPrice=10&maxPrice=80
 
 All parameters optional. `sortBy` is checked against a whitelist, so a bad value returns
 400 instead of leaking a Spring Data `PropertyReferenceException` as a 500.
+
+### Endpoints added in Phase 3
+
+| | |
+|---|---|
+| `GET /api/v1/products/low-stock` | reorder report, lowest stock first (admin) |
+| `GET /api/v1/products/{id}/related` | "customers also bought", from order history (public) |
+| `GET /api/v1/categories/search` | paginated, keyword-filtered category listing (admin) |
+| `GET /api/v1/orders/history` | paginated order history, optionally by status |
+| `GET /api/v1/reports/sales/daily` | order count, revenue and average order value per day |
+| `GET /api/v1/reports/sales/revenue` | total revenue over a window |
+| `GET /api/v1/reports/orders/by-status` | counts and value grouped by status |
+| `GET /api/v1/reports/products/top-selling` | ranked by units sold |
+| `GET /api/v1/reports/products/missed-demand` | checkouts refused for want of stock |
+| `GET /api/v1/reports/categories/revenue` | revenue per category |
+| `GET /api/v1/reports/categories/summary` | product count and price range per category |
+| `GET /api/v1/reports/categories/{id}/stock-distribution` | how a category's stock is spread |
+| `GET /api/v1/reports/customers/top` | highest-spending customers |
+| `GET /api/v1/reports/customers/lapsed` | bought before, not since a date |
+
+Everything under `/reports` is `ADMIN`, declared once on the controller class rather than
+per method — every one of them aggregates across all customers, and repeating the
+annotation is what eventually leaves one of them public.
+
+Report windows are optional and half-open: `from` inclusive, `to` inclusive at day
+granularity because the service adds a day before querying. Writing the predicate as
+`BETWEEN from AND to` instead would silently drop everything that happened on the last
+day after midnight, which is most of it.
+
+Ranked reports do **not** accept a sort parameter. The ordering is what makes the page
+mean something; re-sorting it would not reorder the rows on the page, it would change
+which rows are on the page.
 
 ### SKUs are generated, never supplied
 
@@ -330,6 +375,38 @@ Zero rows updated means insufficient stock — check and decrement in one statem
 no read-then-write race. If any line fails, the whole order rolls back: no partial order,
 no stock reserved against an order that was never created.
 
+The transaction attributes are declared rather than inherited:
+
+```java
+@Transactional(propagation = Propagation.REQUIRED,
+        isolation = Isolation.READ_COMMITTED,
+        timeout = 15,
+        rollbackFor = Exception.class)
+```
+
+`READ_COMMITTED` is PostgreSQL's default and is stated so the assumption is visible
+rather than inherited from a server setting somebody could change. Nothing here needs
+more: the conditional update already makes check-and-take atomic, so there is no
+read-then-write window for a stronger level to protect. `REPEATABLE_READ` would not make
+this safer — it would make two customers buying the same product abort each other with
+serialization failures instead of queueing. The timeout exists because a stalled checkout
+holds inventory row locks that every other buyer of that product is waiting behind.
+
+**Repeated basket lines are merged.** Left unmerged, two decrements of 3 against 5 units
+take 3 and then fail — rolling back a checkout that a single line of 6 would also have
+failed, but reporting the wrong requested quantity, and only after moving stock.
+
+**A failed checkout still leaves a record.** `CheckoutAuditServiceImpl` writes the
+shortfall on a `REQUIRES_NEW` transaction, one statement before the checkout rolls back.
+Under the default `REQUIRED` the insert would join that transaction and be rolled back
+with it — the record of the failure destroyed by the failure it records. That table is
+what `/api/v1/reports/products/missed-demand` reads: sales the catalogue could not make,
+which are invisible in the orders table because the order was never written.
+
+It carries no foreign keys to `users` or `products`, deliberately. An audit row states
+what was true at a moment in time; it must not block a product from being deleted later,
+and it must not vanish when one is.
+
 **Order status** follows an explicit state machine — `PENDING → PAID → SHIPPED →
 DELIVERED`, with `CANCELLED` reachable from `PENDING` or `PAID`, and `DELIVERED` /
 `CANCELLED` final. Cancelling returns the reserved stock.
@@ -337,13 +414,21 @@ DELIVERED`, with `CANCELLED` reachable from `PENDING` or `PAID`, and `DELIVERED`
 **Deletes are guarded**: a product that appears in an order and a category still holding
 products both return 409 rather than surfacing a foreign-key violation.
 
+All of the above is asserted by `OrderTransactionRollbackTest` against a real database —
+see [Build and test](#build-and-test).
+
 ---
 
 ## Performance
 
 | Optimization | Where | Effect |
 |---|---|---|
-| Caffeine caches | `CacheConfig` | 5 product reads → 1 service call; bounded and expiring, unlike the Phase 1 static map |
+| Batch fetching | `default_batch_fetch_size=25` | paginated order list: **52 JDBC statements → 5** |
+| Aggregates in SQL | `OrderRepository.summarizeByStatus` and friends | status breakdown reads **5 rows instead of 400** |
+| `existsByUserId` | `UserServiceImpl.delete` | answered by an index instead of loading 400 orders, 1 200 lines and their products |
+| Caffeine caches | `CacheConfig` | product detail 10.5 ms → 0.14 ms; daily sales report 11.7 ms → 0.17 ms |
+| `@CachePut` on update | `ProductServiceImpl`, `UserServiceImpl` | the entry is replaced with the new value, not dropped |
+| Interface projections | reports, reorder page | selects the columns the report renders, not whole entities |
 | Batched stock lookup | `ProductServiceImpl.browse` | one query per page, not per row |
 | Fetch-joined category | `ProductSpecifications` | no lazy load per row |
 | `@BatchMapping` | `Product.reviewSummary` | 12 aggregations → 1 |
@@ -351,11 +436,20 @@ products both return 409 rather than surfacing a foreign-key violation.
 | Connection pooling | HikariCP | removed the ~96 ms per-call connect cost measured in Phase 1 |
 | Response compression | `server.compression` | JSON catalogue pages |
 
-Caches are correct by eviction, not by TTL — every path that moves stock evicts the
-product cache, since a cached product carries a stock figure.
+Catalogue caches are correct **by eviction** — every path that moves stock evicts the
+product cache, since a cached product carries a stock figure. Sales reports are correct
+**by expiry**, deliberately: every checkout changes a revenue figure, so an eviction rule
+would keep that cache permanently cold. A revenue figure is a snapshot with a
+five-minute staleness bound, and it says so.
 
-Full measurements, including a REST vs GraphQL comparison, are in
-[docs/performance-report.md](docs/performance-report.md).
+`@CachePut` is only safe because the cache manager is wrapped in a
+`TransactionAwareCacheManagerProxy`, which defers every put and evict until the
+transaction commits. Without it the cache is written before commit, and a constraint
+violation at flush would leave a value cached that the database rejected.
+
+Full measurements — including the negative results and one measurement that had to be
+discarded for being invalid — are in
+[docs/performance-report.md](docs/performance-report.md), section 11.
 
 ---
 
@@ -449,10 +543,47 @@ logging.level.org.hibernate.SQL_SLOW=WARN
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=prod
 ```
 
-**Test coverage is currently one context-load test.** The Phase 1 suites (116 tests)
-covered DAOs and services that no longer exist and were removed with them. Rewriting
-them against the Spring stack — `@DataJpaTest` for repositories, Mockito for services,
-`@WebMvcTest` for controllers — is the largest outstanding piece of work.
+### What the suite covers
+
+26 tests, all of which need a real PostgreSQL database — there is no embedded one on the
+classpath. Create it once:
+
+```bash
+createdb -U postgres smart_ecommerce_test_db
+```
+
+| Suite | Tests | What it proves |
+|---|---:|---|
+| `OrderTransactionRollbackTest` | 6 | Checkout commits and rolls back as a unit; the shortfall audit survives the rollback |
+| `ReportQueryIntegrationTest` | 14 | Every JPQL **and native** query executes and binds to its projection |
+| `ProductCacheBehaviourTest` | 5 | `@Cacheable`, `@CachePut` and `@CacheEvict` do what they claim |
+| `EcommerceApplicationTests` | 1 | The whole context wires up |
+
+Two of these are worth explaining.
+
+`OrderTransactionRollbackTest` is deliberately **not** `@Transactional`. That is the
+standard way to write a JPA test, and here it would make every assertion meaningless: the
+service would join the test's transaction, its rollback would become a rollback of the
+test, and the suite would pass whether or not `placeOrder` were transactional at all. So
+the fixtures commit for real and are deleted afterwards.
+
+`ReportQueryIntegrationTest` exists because JPQL is parsed when the context starts — a
+typo fails the application at boot and is impossible to miss — while **native SQL is not
+checked until something runs it**. A malformed native query would sit in the repository
+looking healthy until an administrator opened a monthly report. Those 14 tests are how
+the `FILTER`, `date_trunc`, `to_char`, window-function and self-join clauses are verified
+at all.
+
+### Benchmarks
+
+The measurements in section 11 of the performance report come from a committed harness,
+skipped unless you ask for it:
+
+```bash
+./mvnw -o test -Dtest=Phase3BenchmarkTest,OrderPage*BenchmarkTest -Dbenchmark=true
+```
+
+It seeds ~4 500 rows, prints a markdown table, and deletes what it created.
 
 ---
 
@@ -461,9 +592,10 @@ them against the Spring stack — `@DataJpaTest` for repositories, Mockito for s
 | | |
 |---|---|
 | [docs/project-implementation.md](docs/project-implementation.md) | how the code works and why, in plain language |
-| [docs/performance-report.md](docs/performance-report.md) | indexing study, application-layer measurements, REST vs GraphQL |
+| [docs/performance-report.md](docs/performance-report.md) | indexing study, application-layer measurements, REST vs GraphQL, and the Phase 3 persistence measurements |
 | [docs/sql/schema.sql](docs/sql/schema.sql) | Phase 1 DDL, still the reference for column shapes |
 | [docs/sql/migration-phase2.sql](docs/sql/migration-phase2.sql) | Phase 1 → Phase 2 schema migration |
+| [docs/sql/migration-phase3.sql](docs/sql/migration-phase3.sql) | Phase 2 → Phase 3: shortfall audit table and reporting indexes |
 | [docs/sql/migration-password-encoding.sql](docs/sql/migration-password-encoding.sql) | password hash format migration |
 | [docs/nosql/](docs/nosql/) | document schemas for reviews and logs |
 
@@ -478,7 +610,15 @@ Recorded rather than hidden:
    theirs. Needs a check comparing the authenticated principal to the order's owner, with
    `ADMIN` exempt.
 2. **BCrypt runs on every request** (~95 ms). The cost belongs at login; a session or a
-   short-lived token would pay it once.
+   short-lived token would pay it once. It remains the largest single cost in the system —
+   larger than every Phase 3 wall-time improvement combined.
 3. **No GraphQL depth or complexity limit.** A sufficiently nested query can cost far
    more than any REST endpoint.
-4. **Test coverage**, as above.
+4. **The Phase 3 endpoints are REST only.** The GraphQL schema was left as it is rather
+   than widened to match; reports and the paginated variants are not exposed there.
+5. **The Phase 3 indexes are unmeasured.** `migration-phase3.sql` adds eight, chosen from
+   what the new queries filter and group on, but they have not been through the
+   before/after protocol the Phase 1 study used.
+6. **No concurrency test.** The conditional decrement is argued to be race-free because
+   check and take are one statement, and there is a pessimistic lock behind it. Neither
+   claim is exercised under actual concurrent load.
