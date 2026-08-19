@@ -1015,7 +1015,7 @@ If you want to inspect the implementation directly, start here:
 ## 28. What Phase 3 Added
 
 Phase 3 did not add features so much as change how the existing ones talk to the
-database. Six things changed.
+database. Nine things changed.
 
 **Repositories learned to answer questions instead of returning rows.**
 
@@ -1079,15 +1079,67 @@ with the new value, which the update method already has in its hands. That is on
 because cache writes now wait for the transaction to commit — otherwise a write that
 failed at the last moment would leave the cache serving something the database rejected.
 
+**Both transports stay in step.**
+
+GraphQL was left untouched at first, which quietly meant the two APIs described
+different systems — REST could run reports, GraphQL could not. It now covers the
+same ground: paginated order, user and category views, plus the reports.
+
+The reports are not just a mirror, though. `salesReport` and `catalogueReport`
+are types whose every field is resolved on its own, so an admin dashboard fetches
+four panels in one request instead of four REST calls — and a dashboard that only
+shows the revenue headline never runs the expensive daily grouping behind the
+chart. Over REST that choice does not exist: the daily endpoint computes the
+series whether you draw it or not.
+
+Testing that turned up a real bug that had been there since Phase 2. Spring
+Security throws one kind of exception when a signed-in user lacks the role, and a
+different one when nobody is signed in at all. The GraphQL error handler only
+recognised the first, so an unauthenticated call to any admin operation came back
+as a generic internal error. "You need to sign in" was reaching clients as "we
+crashed" — a fixable problem reported as an unfixable one. It now says
+UNAUTHORIZED, which is what the REST side had always said.
+
+**One place uses Query by Example, and only one.**
+
+The administrator's user search is now a probe object: fill in the fields you care
+about, leave the rest null, and let a matcher say how they are compared. It reads
+better than the method name it replaced, and it fixed something — the old derived
+method searched full name and e-mail but not username, so looking a user up by the
+username shown on every screen returned nothing.
+
+It is not used anywhere else, deliberately. A probe can only say "equals" or
+"contains" about one entity's own columns. Products and orders filter on ranges —
+a price between two values, a date inside a window — and a probe has one slot per
+field, so it cannot say "between". Categories have a single searchable column,
+where a probe would be more code saying less. Reports return totals rather than
+entities. The code says so in each place, because "why isn't this used here" is a
+question worth answering once rather than repeatedly.
+
+**No password is written down anywhere.**
+
+There used to be a default administrator password, and it was the same literal
+string in five places including this document. That is a known password for every
+deployment that never changed it, published in the repository, and convenient
+enough that nobody would change it.
+
+Now: set a password and it is used and never logged. Set nothing and one is
+generated for that run and printed once at startup, because a password nobody can
+read is just a locked account. Sample customer accounts get their own separate
+password, so handing someone a demo login does not hand them the administrator's.
+
 **Tests that check the parts that fail quietly.**
 
-The suite went from one test to twenty-six. Two of them are worth understanding:
+The suite went from one test to forty-nine. Three of them are worth understanding:
 
 - The rollback tests deliberately do *not* use `@Transactional`. That is the normal way
   to write a database test, and here it would quietly make every assertion meaningless.
 - There is a suite that does nothing but run every native query once. JPQL errors show up
   when the application starts, so they are impossible to miss; a broken native query
   waits silently until somebody opens the report.
+- The seeder tests turn seeding back on for one run. The test profile switches it off so
+  tests own their data, which meant the code that actually creates the administrator
+  account was never being run at all.
 
 ---
 
