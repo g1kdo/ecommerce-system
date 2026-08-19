@@ -43,8 +43,11 @@ public class OpenApiConfig {
                                 .description("""
                                         Use the Authorize button, not the browser's own popup.
                                         Username field: your account e-mail address or your username \
-                                        (either works). Seeded administrator: \
-                                        admin@smartecommerce.rw / Admin@12345""")))
+                                        (either works). The seeded administrator account and its
+                                        password are printed once in the application log at first
+                                        startup; they are deliberately not published here, because
+                                        anything written into this document is a credential every
+                                        deployment shares.""")))
                 .addSecurityItem(new SecurityRequirement().addList(BASIC_AUTH));
     }
 }

@@ -572,22 +572,46 @@ Seed data makes the app useful right away for local work, demos, and tests.
 
 Seed users have encoded passwords, not plain text. That keeps the example data close to real app behavior.
 
+No password is written into this repository at all — not in the code, not in the
+README, not in the OpenAPI document. There used to be one, and it was the same
+literal string in five places. A default password is worse than no default: it is
+guessable precisely because it is documented, and documenting it is what makes it
+convenient enough that nobody changes it.
+
+Instead:
+
+- If `app.seed.admin-password` is set, that value is used and is **never logged**.
+  A password an operator chose may well be one they use elsewhere, and log files
+  outlive the terminal somebody read them in.
+- If it is unset, one is generated from `SecureRandom` for that run and **printed
+  once** at startup. A generated credential nobody can read is just a locked
+  account, so this one has to be shown. It is the same bargain Spring Boot strikes
+  with its own default security user.
+
+The seeder never runs under the `prod` profile, so neither branch can put a
+password into a production log.
+
 ### 15.1 The bootstrap administrator — how to log in
 
-The seeder always makes sure one administrator account exists:
+The seeder always makes sure one administrator account exists, at
+`app.seed.admin-email` (default `admin@smartecommerce.rw`). Its password comes from
+the rule above, and is printed as a warning in the startup log so it is never a
+guess:
 
-| | |
-|---|---|
-| email | `admin@smartecommerce.rw` |
-| password | `Admin@12345` |
-
-Change either with `app.seed.admin-email` and `app.seed.admin-password`, or turn the
-whole seeder off with `app.seed.enabled=false`.
+```
+==========================================================
+ Bootstrap administrator account created
+   email    : admin@smartecommerce.rw
+   password : <generated for this run, or a note that yours was used>
+ Change this before exposing the service to anyone else.
+ Disable with app.seed.enabled=false
+==========================================================
+```
 
 Sign in with HTTP Basic, using the **email address**, not the username:
 
 ```bash
-curl -u admin@smartecommerce.rw:Admin@12345 http://localhost:8080/api/v1/users
+curl -u 'admin@smartecommerce.rw:<the password from your log>' http://localhost:8080/api/v1/users
 ```
 
 This check runs **separately from the sample-data seeding**, and that separation is the
@@ -602,17 +626,6 @@ to reach an admin endpoint to fix it.
 
 The bootstrap check closes that hole. It also never touches an account that already
 exists, so it cannot undo a password an operator deliberately changed.
-
-The credentials are printed as a warning in the startup log, so they are never a guess:
-
-```
-==========================================================
- Bootstrap administrator account created
-   email    : admin@smartecommerce.rw
-   password : Admin@12345
- Change this before exposing the service to anyone else.
-==========================================================
-```
 
 ## 16. Why The Controllers Are Split By Feature
 

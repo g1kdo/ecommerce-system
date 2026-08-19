@@ -63,7 +63,8 @@ public class DataSeeder {
      */
     @Bean
     public Seeder seeder(@Value("${app.seed.admin-email:admin@smartecommerce.rw}") String adminEmail,
-                         @Value("${app.seed.admin-password:Admin@12345}") String adminPassword,
+                         @Value("${app.seed.admin-password:}") String adminPassword,
+                         @Value("${app.seed.sample-password:}") String samplePassword,
                          UserRepository userRepository,
                          CategoryRepository categoryRepository,
                          ProductRepository productRepository,
@@ -72,7 +73,8 @@ public class DataSeeder {
                          ReviewRepository reviewRepository,
                          PasswordEncoder passwordEncoder) {
 
-        return new Seeder(adminEmail, adminPassword, userRepository, categoryRepository, productRepository,
+        return new Seeder(adminEmail, SeedPassword.resolve(adminPassword), SeedPassword.resolve(samplePassword),
+                userRepository, categoryRepository, productRepository,
                 inventoryRepository, orderRepository, reviewRepository, passwordEncoder);
     }
 
@@ -92,10 +94,12 @@ public class DataSeeder {
         private final ReviewRepository reviewRepository;
         private final PasswordEncoder passwordEncoder;
         private final String adminEmail;
-        private final String adminPassword;
+        private final SeedPassword adminPassword;
+        private final SeedPassword samplePassword;
 
         public Seeder(String adminEmail,
-                      String adminPassword,
+                      SeedPassword adminPassword,
+                      SeedPassword samplePassword,
                       UserRepository userRepository,
                       CategoryRepository categoryRepository,
                       ProductRepository productRepository,
@@ -112,6 +116,7 @@ public class DataSeeder {
             this.passwordEncoder = passwordEncoder;
             this.adminEmail = adminEmail;
             this.adminPassword = adminPassword;
+            this.samplePassword = samplePassword;
         }
 
         @Transactional
@@ -152,7 +157,7 @@ public class DataSeeder {
                 return;
             }
 
-            User admin = user("admin", adminEmail, adminPassword, "System Administrator",
+            User admin = user("admin", adminEmail, adminPassword.value(), "System Administrator",
                     "+250788000001", UserRole.ADMIN);
 
             // A username collision is possible even when the e-mail is free.
@@ -169,7 +174,7 @@ public class DataSeeder {
                        password : {}
                      Change this before exposing the service to anyone else.
                      Disable with app.seed.enabled=false
-                    ==========================================================""", adminEmail, adminPassword);
+                    ==========================================================""", adminEmail, adminPassword.forDisplay());
         }
 
         private List<User> seedUsers() {
@@ -179,17 +184,27 @@ public class DataSeeder {
             }
 
             List<User> users = List.of(
-                    user("admin", "admin@smartecommerce.rw", "Admin@12345", "System Administrator",
+                    user("admin", adminEmail, adminPassword.value(), "System Administrator",
                             "+250788000001", UserRole.ADMIN),
-                    user("kmugisha", "k.mugisha@example.com", "Customer@123", "Kevine Mugisha",
+                    user("kmugisha", "k.mugisha@example.com", samplePassword.value(), "Kevine Mugisha",
                             "+250788000002", UserRole.CUSTOMER),
-                    user("jdoe", "j.doe@example.com", "Customer@123", "John Doe",
+                    user("jdoe", "j.doe@example.com", samplePassword.value(), "John Doe",
                             "+250788000003", UserRole.CUSTOMER),
-                    user("aingabire", "a.ingabire@example.com", "Customer@123", "Alice Ingabire",
+                    user("aingabire", "a.ingabire@example.com", samplePassword.value(), "Alice Ingabire",
                             "+250788000004", UserRole.CUSTOMER));
 
             List<User> saved = userRepository.saveAll(users);
-            log.info("Seeded {} users (admin@smartecommerce.rw / Admin@12345)", saved.size());
+
+            // The credentials are logged here and nowhere else - not in the README,
+            // not in the OpenAPI document. Anything written down in the repository
+            // is a password every deployment shares.
+            if (samplePassword.isPrintable())
+                log.warn("Seeded {} sample accounts. Password for the customer accounts: {}",
+                        saved.size(), samplePassword.value());
+            else
+                log.info("Seeded {} sample accounts using the configured app.seed.sample-password",
+                        saved.size());
+
             return saved;
         }
 
