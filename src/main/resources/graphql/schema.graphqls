@@ -25,6 +25,11 @@ type Product {
     # @BatchMapping - one MongoDB aggregation per query rather than one per
     # product. See ReviewGraphQLController.reviewSummary.
     reviewSummary: ReviewSummary!
+
+    # Customers-also-bought, from order history rather than the catalogue.
+    # A field rather than a root query because it belongs to a product, and
+    # because it then costs nothing unless a client asks for it.
+    relatedProducts(limit: Int = 5): [RelatedProduct!]!
 }
 
 type ProductPage {
@@ -93,6 +98,145 @@ enum OrderStatus {
     SHIPPED
     DELIVERED
     CANCELLED
+}
+
+
+type OrderPage {
+    content: [Order!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+type UserPage {
+    content: [User!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+type CategoryPage {
+    content: [Category!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+type LowStockPage {
+    content: [LowStockProduct!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+type LowStockProduct {
+    productId: ID!
+    sku: String!
+    name: String!
+    categoryName: String!
+    quantity: Int!
+}
+
+type RelatedProduct {
+    productId: ID!
+    productName: String!
+    timesBoughtTogether: Int!
+}
+
+# ---------- Reporting ----------
+# Every field of SalesReport and CatalogueReport is resolved on demand. A
+# dashboard asking only for totalRevenue does not run the daily group-by, and one
+# asking for four panels gets them in one round trip instead of four REST calls.
+# That is the case section 6.3 of the performance report measured GraphQL winning.
+
+type DailySales {
+    day: String!
+    orderCount: Int!
+    revenue: Float!
+    averageOrderValue: Float!
+}
+
+type OrderStatusSummary {
+    status: OrderStatus!
+    orderCount: Int!
+    revenue: Float!
+}
+
+type TopProduct {
+    productId: ID!
+    productName: String!
+    sku: String!
+    unitsSold: Int!
+    revenue: Float!
+}
+
+type CategoryRevenue {
+    categoryId: ID!
+    name: String!
+    orderCount: Int!
+    unitsSold: Int!
+    revenue: Float!
+}
+
+type CategorySummary {
+    categoryId: ID!
+    name: String!
+    productCount: Int!
+    # Null for a category with no products: it has no cheapest item, and saying
+    # zero would claim it sells something free.
+    minPrice: Float
+    maxPrice: Float
+    averagePrice: Float
+}
+
+type CustomerSpend {
+    userId: ID!
+    fullName: String!
+    email: String!
+    orderCount: Int!
+    totalSpent: Float!
+}
+
+type MissedDemand {
+    # No product name: the shortfall audit carries no foreign key, so the product
+    # may since have been deleted. Inventing a name for one that is gone would be
+    # worse than reporting the id.
+    productId: ID!
+    occurrences: Int!
+    unitsMissed: Int!
+}
+
+type StockShare {
+    productId: ID!
+    sku: String!
+    name: String!
+    quantity: Int!
+    shareOfCategoryStock: Float!
+}
+
+type SalesReport {
+    totalRevenue: Float!
+    daily: [DailySales!]!
+    byStatus: [OrderStatusSummary!]!
+    topProducts(limit: Int = 10): [TopProduct!]!
+    revenueByCategory: [CategoryRevenue!]!
+    topCustomers(limit: Int = 10): [CustomerSpend!]!
+    lapsedCustomers(since: String, limit: Int = 10): [CustomerSpend!]!
+}
+
+type CatalogueReport {
+    categories: [CategorySummary!]!
+    lowStock(threshold: Int = 5, page: Int = 0, size: Int = 20): LowStockPage!
+    stockDistribution(categoryId: ID!): [StockShare!]!
+    missedDemand(since: String, limit: Int = 10): [MissedDemand!]!
 }
 
 # ---------- Inputs ----------
@@ -167,9 +311,26 @@ type Query {
     ordersByUser(userId: ID!): [Order!]!
     order(id: ID!): Order!
 
+    # Paginated order views. ordersByUser above returns a whole history in one
+    # response and has no upper bound; prefer orderHistory.
+    orderHistory(userId: ID!, status: OrderStatus, page: Int = 0, size: Int = 20,
+        sortBy: String = "orderDate", direction: String = "DESC"): OrderPage!
+    orders(status: OrderStatus, page: Int = 0, size: Int = 20,
+        sortBy: String = "orderDate", direction: String = "DESC"): OrderPage!
+
     # Administration
     users: [User!]!
     user(id: ID!): User!
+    searchUsers(keyword: String, page: Int = 0, size: Int = 20,
+        sortBy: String = "id", direction: String = "ASC"): UserPage!
+    searchCategories(keyword: String, page: Int = 0, size: Int = 20,
+        sortBy: String = "name", direction: String = "ASC"): CategoryPage!
+
+    # Reporting. Dates are ISO-8601 strings (YYYY-MM-DD), matching the
+    # convention the rest of this schema uses for timestamps. Both default to
+    # the last 30 days.
+    salesReport(from: String, to: String): SalesReport!
+    catalogueReport: CatalogueReport!
 }
 
 type Mutation {

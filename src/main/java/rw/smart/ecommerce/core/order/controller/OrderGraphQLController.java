@@ -10,6 +10,7 @@ import rw.smart.ecommerce.core.order.dto.OrderRequest;
 import rw.smart.ecommerce.core.order.dto.OrderResponse;
 import rw.smart.ecommerce.core.order.enums.OrderStatus;
 import rw.smart.ecommerce.core.order.service.OrderService;
+import rw.smart.ecommerce.utils.response.PageResponse;
 
 import java.util.List;
 
@@ -48,6 +49,34 @@ public class OrderGraphQLController {
     @QueryMapping
     public OrderResponse order(@Argument Long id) {
         return orderService.findById(id);
+    }
+
+    /**
+     * The paginated history. Prefer it over {@code ordersByUser}, which returns a
+     * customer's entire history in one response and has no upper bound.
+     */
+    @PreAuthorize("isAuthenticated()")
+    @QueryMapping
+    public PageResponse<OrderResponse> orderHistory(@Argument Long userId,
+                                                    @Argument OrderStatus status,
+                                                    @Argument Integer page,
+                                                    @Argument Integer size,
+                                                    @Argument String sortBy,
+                                                    @Argument String direction) {
+
+        return orderService.findByUser(userId, status, page, size, sortBy, direction);
+    }
+
+    /** Every order, for oversight. ADMIN, matching GET /api/v1/orders/all. */
+    @PreAuthorize("hasRole('ADMIN')")
+    @QueryMapping
+    public PageResponse<OrderResponse> orders(@Argument OrderStatus status,
+                                              @Argument Integer page,
+                                              @Argument Integer size,
+                                              @Argument String sortBy,
+                                              @Argument String direction) {
+
+        return orderService.findAll(status, page, size, sortBy, direction);
     }
 
     @PreAuthorize("isAuthenticated()")
