@@ -28,27 +28,42 @@ seeds sample data on first start: 4 users, 5 categories, 12 products with stock,
 
 ### Signing in
 
-The seeder guarantees one administrator account exists, and prints it at startup:
+The seeder guarantees one administrator account exists and **prints its
+credentials once, in the startup log**:
 
-| | |
-|---|---|
-| **email** | `admin@smartecommerce.rw` |
-| **password** | `Admin@12345` |
-
-Authentication is **HTTP Basic**. The username field accepts **either the e-mail address
-or the username** — `admin@smartecommerce.rw` and `admin` both work, since both columns
-are unique.
-
-```bash
-curl -u admin@smartecommerce.rw:Admin@12345 http://localhost:8080/api/v1/users
+```
+==========================================================
+ Bootstrap administrator account created
+   email    : admin@smartecommerce.rw
+   password : <generated for this run>
+ Change this before exposing the service to anyone else.
+ Disable with app.seed.enabled=false
+==========================================================
 ```
 
-Seeded customers use `Customer@123` (`k.mugisha@example.com`, `j.doe@example.com`,
-`a.ingabire@example.com`).
+No password is published in this repository, and that is deliberate. A default
+written into the README is a password every deployment shares, guessable exactly
+because it is documented — and convenient enough that nobody changes it. So:
 
-Override with `app.seed.admin-email` / `app.seed.admin-password`, or turn seeding off
-with `app.seed.enabled=false`. The bootstrap check never modifies an account that
-already exists, so a password you have changed yourself is safe.
+- **Leave `app.seed.admin-password` unset** and a fresh one is generated from
+  `SecureRandom` for that run and printed as above.
+- **Set it** and that value is used and *never* logged, on the assumption that a
+  password you chose may be one you use elsewhere.
+
+The same applies to `app.seed.sample-password` for the demo customer accounts
+(`k.mugisha@example.com`, `j.doe@example.com`, `a.ingabire@example.com`).
+
+Authentication is **HTTP Basic**. The username field accepts **either the e-mail
+address or the username** — `admin@smartecommerce.rw` and `admin` both work, since
+both columns are unique.
+
+```bash
+curl -u 'admin@smartecommerce.rw:<the password from your log>' http://localhost:8080/api/v1/users
+```
+
+The bootstrap check never modifies an account that already exists, so a password
+you have changed yourself is safe. Turn seeding off entirely with
+`app.seed.enabled=false`.
 
 **In Swagger UI**, click the **Authorize** button at the top of the page and enter the
 same e-mail and password. Do not use the browser's own popup — the API deliberately does
