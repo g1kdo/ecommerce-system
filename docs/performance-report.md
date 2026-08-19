@@ -577,7 +577,7 @@ Found while benchmarking, and worth carrying forward as work rather than a footn
 |---|---|---|
 | 1 | GraphQL order queries were readable without credentials | **Fixed** — §6.6 |
 | 2 | Any authenticated user can read any other user's orders, over both APIs. `GET /orders?userId=…` and `ordersByUser(userId:)` check that the caller is signed in, not that the orders are theirs | **Open.** Needs an ownership check comparing the authenticated principal to the order's owner, with ADMIN exempt |
-| 3 | Test coverage is one context-load test | **Closed in Phase 3.** 26 tests covering transaction boundaries, every native query, and cache behaviour — see [§11.10](#1110-phase-3-test-coverage) |
+| 3 | Test coverage is one context-load test | **Closed in Phase 3.** 49 tests covering transaction boundaries, every native query, the GraphQL surface, cache behaviour and the seeded credentials — see [§11.10](#1110-phase-3-test-coverage) |
 
 ---
 
@@ -889,13 +889,17 @@ pass whether or not `placeOrder` were transactional at all.
 
 ### 11.10 Phase 3 test coverage
 
-`§8.3` recorded "test coverage is one context-load test" as an open item. It is now 26:
+`§8.3` recorded "test coverage is one context-load test" as an open item. It is now 49:
 
 | Suite | Tests | What it proves |
 |---|---:|---|
-| `OrderTransactionRollbackTest` | 6 | Transaction boundaries and rollback, against a real database |
 | `ReportQueryIntegrationTest` | 14 | Every JPQL and **native** query executes and binds |
+| `ReportGraphQLTest` | 8 | The GraphQL surface resolves; unselected fields cost nothing; both authorization paths refuse correctly |
+| `SeedPasswordTest` | 7 | No default password ships; a configured one is never logged |
+| `OrderTransactionRollbackTest` | 6 | Transaction boundaries and rollback, against a real database |
+| `UserSearchQueryByExampleTest` | 6 | The Example probe matches on three fields, OR'd not AND'd |
 | `ProductCacheBehaviourTest` | 5 | `@Cacheable`, `@CachePut` and `@CacheEvict` do what they claim |
+| `DataSeederCredentialsTest` | 2 | Seeding an empty database creates the admin with the configured password, hashed |
 | `EcommerceApplicationTests` | 1 | Context loads |
 
 `ReportQueryIntegrationTest` exists because of an asymmetry that is easy to be caught by.
@@ -904,6 +908,18 @@ impossible to miss. **Native SQL is not.** A malformed native query sits in the 
 looking healthy until something runs it — which, for a report an administrator opens once
 a month, could be long after it shipped. Those 14 tests are how the `FILTER`,
 `date_trunc`, `to_char`, window-function and self-join clauses are checked at all.
+
+Two of these suites found real defects rather than merely confirming the code:
+
+- `ReportGraphQLTest` found that an unauthenticated call to any admin query or mutation
+  answered `INTERNAL_ERROR`. Method security throws `AccessDeniedException` for a
+  signed-in caller without the role, but `AuthenticationCredentialsNotFoundException` when
+  there is no principal at all, and `GraphQlExceptionResolver` classified only the first.
+  "You need to sign in" was reaching clients as "we crashed". This predates Phase 3 and
+  applied to every `@PreAuthorize`'d GraphQL operation — a third member of the §6.6 family,
+  found the same way: by testing the transport rather than the service behind it.
+- `UserSearchQueryByExampleTest` found that the admin user search could not match a
+  username, because the derived method behind it searched full name and e-mail only.
 
 ### 11.11 What Phase 3 did not measure
 

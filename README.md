@@ -213,6 +213,11 @@ All parameters optional. `sortBy` is checked against a whitelist, so a bad value
 | `GET /api/v1/reports/customers/top` | highest-spending customers |
 | `GET /api/v1/reports/customers/lapsed` | bought before, not since a date |
 
+The same ground is covered by GraphQL — `orderHistory`, `orders`, `searchUsers`,
+`searchCategories`, `salesReport`, `catalogueReport`, and `relatedProducts` as a field
+on `Product`. See [Reporting is where GraphQL earns its place](#reporting-is-where-graphql-earns-its-place)
+for why the report queries are not merely a mirror of these.
+
 Everything under `/reports` is `ADMIN`, declared once on the controller class rather than
 per method — every one of them aggregates across all customers, and repeating the
 annotation is what eventually leaves one of them public.
@@ -272,6 +277,45 @@ and **0** when the field is not selected, since GraphQL only resolves what was a
 service already fetch-joins the category and loads stock for a whole page in one query,
 so a DataLoader there would add machinery for no gain.
 
+### Reporting is where GraphQL earns its place
+
+Phase 3 gave the two transports the same coverage, but the reporting endpoints are not
+just a mirror of the REST ones.
+
+`salesReport` and `catalogueReport` are types whose **every field is a resolver**:
+
+```graphql
+query {
+  salesReport(from: "2026-07-01", to: "2026-07-31") {
+    totalRevenue
+    daily { day revenue }
+    byStatus { status orderCount }
+    topProducts(limit: 5) { productName unitsSold }
+  }
+}
+```
+
+That is four dashboard panels in one request. Over REST it is four calls, each paying
+authentication again — which [§6.5](docs/performance-report.md) measured at ~95 ms
+apiece.
+
+The second half matters more. A dashboard that renders only the revenue headline asks
+only for `totalRevenue`, and the `date_trunc` group-by behind `daily` **never runs**.
+REST cannot offer that: `/reports/sales/daily` computes the series whether the caller
+draws it or not. A test asserts it with Hibernate's statement counter rather than by eye.
+
+`relatedProducts` is a field on `Product` for the same reason `reviewSummary` is — it
+belongs to a product, and costs nothing when unselected. Unlike `reviewSummary` it is
+**not** batched: a catalogue page selecting it for twenty products would run twenty
+self-joins, so it is meant for a detail view. Batching it would mean rewriting the
+bought-together query to group over a set of anchor products, which is worth doing once
+something actually asks for it that way.
+
+Dates are ISO-8601 strings, not a custom scalar. Timestamps have been plain strings since
+Phase 2, and adding a scalar now would change the wire format of every existing field for
+the sake of four arguments. The cost is that a malformed date arrives as a valid `String`,
+so `GraphQlDates` rejects it as a `BAD_REQUEST` naming the argument.
+
 ### Authorization lives on the methods
 
 `/graphql` is a single POST endpoint, so URL rules cannot distinguish a public catalogue
@@ -279,6 +323,21 @@ query from a private one. Every non-public query and mutation carries its own
 `@PreAuthorize`. There is no path rule underneath acting as a safety net, which *is* true
 for REST — a difference that already caused one real defect (see the performance report,
 §6.6).
+
+The report field resolvers are the one place `@PreAuthorize` is deliberately **absent**,
+and the reasoning is worth stating because it looks like the same omission. A
+`@SchemaMapping` is only ever invoked with a source object of its parent type; nothing but
+the `ADMIN`-gated root query returns a `SalesReport` or a `CatalogueReport`; so there is no
+path to those fields that has not already been refused.
+
+Phase 3 also fixed a second defect of the §6.6 family, found while testing the above.
+Method security throws `AccessDeniedException` when a signed-in caller lacks the role, but
+`AuthenticationCredentialsNotFoundException` when there is **no principal at all**.
+`GraphQlExceptionResolver` classified only the first, so an unauthenticated call to any
+admin query or mutation came back as `INTERNAL_ERROR` — "you need to sign in" reaching the
+client as "we crashed", indistinguishable from a genuine fault and impossible to act on.
+It now answers `UNAUTHORIZED`, matching what `GlobalExceptionHandler` had always done on
+the REST side. Both paths have a test.
 
 ---
 
@@ -560,8 +619,8 @@ logging.level.org.hibernate.SQL_SLOW=WARN
 
 ### What the suite covers
 
-26 tests, all of which need a real PostgreSQL database — there is no embedded one on the
-classpath. Create it once:
+49 tests. All but the seven `SeedPassword` ones need a real PostgreSQL database —
+there is no embedded one on the classpath. Create it once:
 
 ```bash
 createdb -U postgres smart_ecommerce_test_db
@@ -569,12 +628,16 @@ createdb -U postgres smart_ecommerce_test_db
 
 | Suite | Tests | What it proves |
 |---|---:|---|
-| `OrderTransactionRollbackTest` | 6 | Checkout commits and rolls back as a unit; the shortfall audit survives the rollback |
 | `ReportQueryIntegrationTest` | 14 | Every JPQL **and native** query executes and binds to its projection |
+| `ReportGraphQLTest` | 8 | The GraphQL surface resolves, unselected panels cost nothing, and both authorization paths are refused correctly |
+| `SeedPasswordTest` | 7 | No default password; a configured one is never logged |
+| `OrderTransactionRollbackTest` | 6 | Checkout commits and rolls back as a unit; the shortfall audit survives the rollback |
+| `UserSearchQueryByExampleTest` | 6 | The Example probe matches on username, e-mail or full name, OR'd not AND'd |
 | `ProductCacheBehaviourTest` | 5 | `@Cacheable`, `@CachePut` and `@CacheEvict` do what they claim |
+| `DataSeederCredentialsTest` | 2 | Seeding into an empty database creates the admin with the configured password, hashed |
 | `EcommerceApplicationTests` | 1 | The whole context wires up |
 
-Two of these are worth explaining.
+Four of these are worth explaining.
 
 `OrderTransactionRollbackTest` is deliberately **not** `@Transactional`. That is the
 standard way to write a JPA test, and here it would make every assertion meaningless: the
@@ -588,6 +651,15 @@ checked until something runs it**. A malformed native query would sit in the rep
 looking healthy until an administrator opened a monthly report. Those 14 tests are how
 the `FILTER`, `date_trunc`, `to_char`, window-function and self-join clauses are verified
 at all.
+
+`ReportGraphQLTest` asserts the field-selection claim with Hibernate's statement counter
+rather than by eye, and it clears the caches before counting — the first version of that
+assertion passed for the wrong reason, because both sides were served warm and issued
+zero statements.
+
+`DataSeederCredentialsTest` turns seeding back on for one context. The test profile
+disables it so tests own their fixtures, which left the branch that actually creates the
+administrator — and therefore the password rule — unexercised.
 
 ### Benchmarks
 
@@ -620,20 +692,27 @@ It seeds ~4 500 rows, prints a markdown table, and deletes what it created.
 
 Recorded rather than hidden:
 
-1. **Ownership is not checked on orders.** `GET /orders?userId=…` and
-   `ordersByUser(userId:)` verify that the caller is signed in, not that the orders are
-   theirs. Needs a check comparing the authenticated principal to the order's owner, with
-   `ADMIN` exempt.
+1. **Ownership is not checked on orders.** `GET /orders?userId=…`,
+   `ordersByUser(userId:)` and `orderHistory(userId:)` verify that the caller is signed
+   in, not that the orders are theirs. Needs a check comparing the authenticated principal
+   to the order's owner, with `ADMIN` exempt.
 2. **BCrypt runs on every request** (~95 ms). The cost belongs at login; a session or a
    short-lived token would pay it once. It remains the largest single cost in the system —
    larger than every Phase 3 wall-time improvement combined.
-3. **No GraphQL depth or complexity limit.** A sufficiently nested query can cost far
-   more than any REST endpoint.
-4. **The Phase 3 endpoints are REST only.** The GraphQL schema was left as it is rather
-   than widened to match; reports and the paginated variants are not exposed there.
+3. **No GraphQL depth or complexity limit**, and Phase 3 made this worse rather than
+   better. `salesReport` and `catalogueReport` are types whose fields each run an
+   aggregate, so one document can now ask for every report at once. It is `ADMIN`-only,
+   which bounds who can do it but not what it costs.
+4. **`Product.relatedProducts` is not batched.** Selecting it across a catalogue page runs
+   one self-join per product. It is documented as a detail-view field; batching it would
+   mean rewriting the bought-together query to group over a set of anchor products.
 5. **The Phase 3 indexes are unmeasured.** `migration-phase3.sql` adds eight, chosen from
    what the new queries filter and group on, but they have not been through the
    before/after protocol the Phase 1 study used.
 6. **No concurrency test.** The conditional decrement is argued to be race-free because
    check and take are one statement, and there is a pessimistic lock behind it. Neither
    claim is exercised under actual concurrent load.
+7. **Dev and test database passwords still live in the git-ignored `.properties` files.**
+   Nothing in the repository is a credential any more, but that is enforced by the ignore
+   rule rather than by the files being safe. `prod` already reads `${DB_PASSWORD}` from the
+   environment; giving `dev` and `test` the same treatment would make the files committable.
