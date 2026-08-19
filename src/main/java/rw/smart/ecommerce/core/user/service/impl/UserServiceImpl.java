@@ -1,6 +1,8 @@
 package rw.smart.ecommerce.core.user.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Example;
+import org.springframework.data.domain.ExampleMatcher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.cache.annotation.CacheEvict;
@@ -112,6 +114,47 @@ public class UserServiceImpl implements UserService {
         return userRepository.findAll().stream().map(UserResponse::from).toList();
     }
 
+    /**
+     * Administrator user search, built as a Query by Example probe.
+     *
+     * <h4>Why Query by Example here</h4>
+     *
+     * The predicate is three optional string containments OR'd together, over a
+     * single entity, with no ranges and no joins. That is the exact shape Query
+     * by Example expresses well: fill in a probe, let null fields mean "don't
+     * care", and let a matcher say how the non-null ones are compared.
+     *
+     * The derived method it replaces was
+     * {@code findByFullNameContainingIgnoreCaseOrEmailContainingIgnoreCase}, which
+     * took the same value twice and did not search usernames — so an
+     * administrator looking up "kmugisha" got nothing back, while the same person
+     * was findable by their full name. Adding username to a derived method means
+     * a 130-character name; here it is one more line on the probe.
+     *
+     * <h4>Where Query by Example was rejected</h4>
+     *
+     * It is not used anywhere else in this codebase, and the reason is the same
+     * every time: a probe can only express equality and string matching against
+     * one entity's own columns.
+     *
+     * <ul>
+     *   <li><b>Products</b> — the catalogue filters on a price <em>range</em>. A
+     *       probe has one slot per field, so it cannot say "between". These stay
+     *       on {@code ProductSpecifications}.</li>
+     *   <li><b>Orders</b> — same problem with the order-date window.</li>
+     *   <li><b>Categories</b> — one searchable column. A probe, a matcher and an
+     *       {@code Example.of} to replace {@code findByNameContainingIgnoreCase}
+     *       would be more code saying less.</li>
+     *   <li><b>Reports</b> — aggregates. Query by Example returns entities.</li>
+     * </ul>
+     *
+     * <h4>What this costs</h4>
+     *
+     * Three leading-wildcard LIKEs, which no B-tree can serve — the same limit
+     * §4.1 of the performance report measured on the catalogue. It is acceptable
+     * here and not there: this is an administrator's occasional lookup over the
+     * smallest of the large tables, not the storefront's primary search box.
+     */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<UserResponse> search(String keyword, Integer page, Integer size,
@@ -121,10 +164,37 @@ public class UserServiceImpl implements UserService {
 
         Page<User> results = keyword == null || keyword.isBlank()
                 ? userRepository.findAll(pageable)
-                : userRepository.findByFullNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
-                        keyword.trim(), keyword.trim(), pageable);
+                : userRepository.findAll(matching(keyword.trim()), pageable);
 
         return PageResponse.from(results, UserResponse::from);
+    }
+
+    /**
+     * A probe carrying the keyword in every field worth searching.
+     *
+     * {@code matchingAny} is the whole point — the default is AND, which would
+     * only match a user whose username, e-mail <em>and</em> full name all
+     * contained the keyword. Null fields are ignored either way, so {@code role},
+     * {@code phone} and {@code createdAt} take no part.
+     *
+     * {@code passwordHash} is listed explicitly under {@code withIgnorePaths}
+     * even though it is null on a fresh probe and would be ignored regardless.
+     * That line is not doing work today; it is there so that a future change
+     * which populates the probe from an existing {@link User} cannot quietly turn
+     * this into a query that matches on stored password hashes.
+     */
+    private Example<User> matching(String keyword) {
+        User probe = new User();
+        probe.setUsername(keyword);
+        probe.setEmail(keyword);
+        probe.setFullName(keyword);
+
+        ExampleMatcher matcher = ExampleMatcher.matchingAny()
+                .withStringMatcher(ExampleMatcher.StringMatcher.CONTAINING)
+                .withIgnoreCase()
+                .withIgnorePaths("id", "passwordHash", "phone", "role", "createdAt");
+
+        return Example.of(probe, matcher);
     }
 
     @Override
