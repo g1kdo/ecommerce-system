@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.graphql.execution.DataFetcherExceptionResolverAdapter;
 import org.springframework.graphql.execution.ErrorType;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Component;
 import rw.smart.ecommerce.utils.exceptions.DocumentStoreException;
 import rw.smart.ecommerce.utils.exceptions.DuplicateResourceException;
@@ -53,6 +54,15 @@ public class GraphQlExceptionResolver extends DataFetcherExceptionResolverAdapte
         // INTERNAL_ERROR — indistinguishable from a crash, and impossible for a
         // client to act on.
         if (exception instanceof AccessDeniedException) return ErrorType.FORBIDDEN;
+        // And this one, for the case above's near neighbour. Method security
+        // throws AccessDeniedException when a signed-in caller lacks the role, but
+        // AuthenticationCredentialsNotFoundException - an AuthenticationException -
+        // when there is no principal at all. Without this branch the second case
+        // fell through to INTERNAL_ERROR, so "you need to sign in" reached the
+        // client as "we crashed": a caller could not tell a fixable problem from
+        // an unfixable one. GlobalExceptionHandler has always answered 401 here;
+        // the GraphQL side had not.
+        if (exception instanceof AuthenticationException) return ErrorType.UNAUTHORIZED;
         if (exception instanceof DocumentStoreException) return ErrorType.INTERNAL_ERROR;
         return null;
     }
@@ -67,6 +77,9 @@ public class GraphQlExceptionResolver extends DataFetcherExceptionResolverAdapte
      * refused would let a caller map out the schema by probing it.
      */
     private String describe(Throwable exception) {
+        if (exception instanceof AuthenticationException)
+            return "Authentication required.";
+
         if (exception instanceof AccessDeniedException)
             return "You do not have permission to perform this action.";
 
