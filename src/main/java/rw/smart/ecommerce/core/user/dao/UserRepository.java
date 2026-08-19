@@ -27,8 +27,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Page<User> findByRole(UserRole role, Pageable pageable);
 
-    Page<User> findByFullNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
-            String fullName, String email, Pageable pageable);
+    /*
+     * There is deliberately no derived finder for the administrator search.
+     *
+     * JpaRepository already extends QueryByExampleExecutor, so findAll(Example,
+     * Pageable) is inherited and UserServiceImpl builds the probe. What used to
+     * be here was:
+     *
+     *   Page<User> findByFullNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
+     *           String fullName, String email, Pageable pageable);
+     *
+     * a 92-character name that took the same value twice, and that could not
+     * search by username without becoming a 130-character one. Query by Example
+     * expresses the same predicate as a probe object - see the reasoning in
+     * UserServiceImpl.search, including where Query by Example was rejected.
+     */
 
     long countByRole(UserRole role);
 
